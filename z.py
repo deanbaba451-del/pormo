@@ -1,7 +1,7 @@
 import os
 import asyncio
 import re
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, types
 from telethon.sessions import StringSession
 from flask import Flask
 import threading
@@ -13,19 +13,18 @@ STRING_SESSION = '1BJWap1sBu2WXMCBnEwAlcTBvFe5m3qWws8Yu6L7xhKgZyiJPxilJSXzv1wB6z
 
 AUTHORIZED_USERS = [8256872080, 6534222591, 7727812432, 8343507331]
 
-# Grup bazlı durumları saklamak için sözlük (Key: Chat ID, Value: Mod)
 group_modes = {}
 
-# Kart ve Telefon Numarası tespiti için Regex (Düzenli İfade)
-CARD_PATTERN = r'\b(?:\d[ -]*?){13,16}\b' # 13-16 haneli rakamlar
-PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}' # Türkiye telefon formatı
+# Kart ve Telefon Numarası tespiti
+CARD_PATTERN = r'\b(?:\d[ -]*?){13,16}\b'
+PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}'
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Aktif"
+    return "Sistem Aktif"
 
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
@@ -34,56 +33,61 @@ def run_flask():
 @client.on(events.NewMessage)
 async def handler(event):
     chat_id = event.chat_id
-    sender_id = event.sender_id
-    text = event.raw_text if event.raw_text else ""
+    sender = await event.get_sender()
     
-    # Mevcut grubun modunu al (Yoksa 'normal' kabul et)
-    current_mode = group_modes.get(chat_id, "normal")
-
-    # 1. BOTLARI VE KENDİNİ KORU: Eğer mesaj bir bottan geliyorsa dokunma
-    if event.sender and event.sender.bot:
+    # 1. BOT KORUMASI: Gönderen bir botsa ASLA işlem yapma
+    if hasattr(sender, 'bot') and sender.bot:
+        return
+    
+    # Kendi mesajlarını da pas geç (Userbot olduğu için kendi komutlarını silmesin)
+    if event.is_reply and event.sender_id == (await client.get_me()).id:
         return
 
-    # 2. ÖZEL FİLTRE: Komutlardan bağımsız Kart ve Telefon Numarası silme
+    text = event.raw_text if event.raw_text else ""
+    current_mode = group_modes.get(chat_id, "normal")
+
+    # 2. OTOMATİK SİLİCİ (Kart/Numara) - Moddan bağımsız çalışır
     if re.search(CARD_PATTERN, text) or re.search(PHONE_PATTERN, text):
         try:
             await event.delete()
-            return # Kart/Numara sildiyse diğer kontrollere bakmaya gerek yok
+            return 
         except: pass
 
-    # 3. KOMUT KONTROLÜ (Sadece Yetkililer)
-    if sender_id in AUTHORIZED_USERS:
-        cmd = text.lower()
+    # 3. YETKİLİ KOMUTLARI
+    if event.sender_id in AUTHORIZED_USERS:
+        cmd = text.lower().strip()
         if cmd == "/aktifmedya":
             group_modes[chat_id] = "aktifmedya"
-            await event.respond("🛡 **Medya Filtresi Bu Grup İçin Aktif:** Sadece ses ve metin.")
+            await event.respond("🛡 **Medya Filtresi Aktif:** Sadece ses ve metin.")
             return
         elif cmd in ["/durmedya", "/durchat"]:
             group_modes[chat_id] = "normal"
-            await event.respond("✅ **Filtreler Bu Grup İçin Kapatıldı.**")
+            await event.respond("✅ **Filtreler Durduruldu.**")
             return
         elif cmd == "/aktifchat":
             group_modes[chat_id] = "aktifchat"
-            await event.respond("🚫 **Chat Bu Grup İçin Kilitlendi:** Her şey silinecek.")
+            await event.respond("🚫 **Chat Kilitlendi:** Tüm yeni mesajlar siliniyor.")
             return
 
-    # 4. GRUP BAZLI FİLTRELEME MANTIĞI
+    # 4. MODA GÖRE SİLME
     if current_mode == "aktifmedya":
-        is_text = event.text and not event.media
-        is_voice = event.voice or event.audio
-        if not (is_text or is_voice):
+        # Ses veya sadece metin değilse sil
+        is_voice = event.voice or event.audio or event.video_note
+        is_pure_text = event.text and not event.media
+        
+        if not (is_pure_text or is_voice):
             try: await event.delete()
             except: pass
 
     elif current_mode == "aktifchat":
-        # Yetkili /durchat yazmadıysa sil
-        if not (sender_id in AUTHORIZED_USERS and text.lower() == "/durchat"):
+        # Yetkili komutu değilse her şeyi sil
+        if not (event.sender_id in AUTHORIZED_USERS and text.lower() == "/durchat"):
             try: await event.delete()
             except: pass
 
 async def main():
     await client.start()
-    print("Bot gruplara özel modla çalışıyor...")
+    print("Bot 7/24 Filtreleme Modunda...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
