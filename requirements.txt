@@ -1,3 +1,5 @@
 telethon
 flask
-gunicorn
+requests
+cryptg
+python-dotenv
