@@ -11,11 +11,13 @@ from flask import Flask
 # --- AYARLAR ---
 API_ID = 35819402
 API_HASH = '61cfbb3a501c02a69f2458a250de8c97'
+# Session kodunu buraya geri ekledim
 STRING_SESSION = '1BJWap1sBux7heN05qZXV9kfJuHYDpsMJCgdluVZo2d1AXeS9vMDbQm-8a-DYv_CBrunyN_8eG8lqofKJ2lHGFaIXWq85pzlasy7g_eVaJT_-2e4KvLjGp5xn7VeSCxJ9UpZ2eMGyLtOGsHNZ0eL0fB7_a-aXfIROJU7qpxqJqly_OvKJ1iGEwVQRzsfWPQJLcBfVIdKTPuOHEjyRYYzn_f7_FS_s-WVesnW0DGo7Y2K0vpm1T_UHxXEuMNBjvtdjNvtCfm3i9RLYyl000u9zYahZJzMWifyKLCChtlWhDfLobdTsQhMvaLkCFVYvCyJYvuPvcdva-wXJd5-dFW8NLmY4b2fjeRo='
-XAI_API_KEY = "APIKEY"
+
+# Sadece API KEY Render Environment Variables üzerinden okunacak (Hata vermemesi için)
+XAI_API_KEY = os.environ.get("XAI_API_KEY")
 
 AUTHORIZED_USERS = [8256872080, 6534222591, 7727812432, 8343507331]
-
 PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}'
 MENTION_PATTERN = r'@\w+'
 
@@ -28,6 +30,7 @@ def home(): return "Sistem Aktif"
 
 def check_nsfw_with_grok(image_path):
     try:
+        if not XAI_API_KEY: return False
         with open(image_path, "rb") as image_file:
             base64_image = base64.b64encode(image_file.read()).decode('utf-8')
         headers = {"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"}
@@ -49,7 +52,6 @@ async def handler(event):
     chat_id = event.chat_id
     sender = await event.get_sender()
     
-    # OWNER MUAFİYETİ
     if sender_id in AUTHORIZED_USERS:
         text_cmd = (event.raw_text or "").lower().strip()
         if text_cmd == "/am":
@@ -69,13 +71,11 @@ async def handler(event):
     text = (event.raw_text or "").lower()
     current_mode = group_modes.get(chat_id)
 
-    # 1. CHAT KİLİDİ
     if current_mode == "aktifchat":
         try: await event.delete()
         except: pass
         return
 
-    # 2. NUMARA SİLİCİ
     if re.search(PHONE_PATTERN, text):
         try:
             await event.delete()
@@ -85,7 +85,6 @@ async def handler(event):
         except: pass
         return
 
-    # 3. REKLAM (GRUP/KANAL) SİLİCİ
     mentions = re.findall(MENTION_PATTERN, text)
     for m in mentions:
         try:
@@ -98,7 +97,6 @@ async def handler(event):
                 return
         except: pass
 
-    # 4. MEDYA VE GROK NSFW ANALİZİ
     if event.media:
         if current_mode == "aktifmedya":
             is_voice = event.voice or event.audio or event.video_note
@@ -122,9 +120,9 @@ async def handler(event):
 
 async def main():
     await client.start()
-    print("Sistem Grok API ve Otomatik Temizleme ile Aktif!")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))), daemon=True).start()
+    port = int(os.environ.get("PORT", 10000))
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port), daemon=True).start()
     asyncio.run(main())
