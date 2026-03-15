@@ -33,16 +33,16 @@ async def handler(event):
         text_cmd = (event.raw_text or "").lower().strip()
         if text_cmd == "/am":
             group_modes[chat_id] = "aktifmedya"
-            return await event.respond("medya filtresi açıldı")
+            return await event.respond("amın oglu medya silme calısıyor keyfine bak 31 cek")
         elif text_cmd == "/dm":
             group_modes.pop(chat_id, None)
-            return await event.respond("medya filtresi kapandı")
+            return await event.respond("cp basma duraklatildi")
         elif text_cmd == "/ac":
             group_modes[chat_id] = "aktifchat"
-            return await event.respond("chat kilitlendi")
+            return await event.respond("chat sekslendi")
         elif text_cmd == "/dc":
             group_modes.pop(chat_id, None)
-            return await event.respond("chat açıldı")
+            return await event.respond("chat seksli")
 
     # 2. BEYAZ LİSTE VE MUAFİYETLER
     if (sender and hasattr(sender, 'bot') and sender.bot) or sender_id in WHITE_LIST_CHANNELS or sender_id in AUTHORIZED_USERS:
