@@ -20,11 +20,14 @@ group_modes = {}
 PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}'
 LINK_PATTERN = r'(?:t\.me|telegram\.me)\/\w+'
 
-# İstemcileri Başlat
+# İstemciler (Bot session'ı None yapıldı ki Render'da hata vermesin)
 user_client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
-bot_client = TelegramClient('guard_bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+bot_client = TelegramClient(None, API_ID, API_HASH) # Bellekte çalışır, dosya yazmaz
 
 app = Flask(__name__)
+
+@app.route('/')
+def home(): return "Sessiz Bot Guard Aktif"
 
 def get_content_fingerprint(event):
     text = event.raw_text or ""
@@ -34,10 +37,7 @@ def get_content_fingerprint(event):
         elif hasattr(event.media, 'document'): media_id = f"doc_{event.media.document.id}"
     return f"{text}_{media_id}"
 
-@app.route('/')
-def home(): return "Sessiz Bot Guard Aktif"
-
-# --- USERBOT HANDLER (Komutlar ve Takip) ---
+# --- USERBOT HANDLER ---
 @user_client.on(events.NewMessage)
 async def user_handler(event):
     global IS_ENABLED
@@ -48,7 +48,7 @@ async def user_handler(event):
     if len(message_store) > 3000:
         message_store.pop(next(iter(message_store)))
 
-    # Komut Kontrol (Sadece Super Admin)
+    # Komut Kontrol
     if event.sender_id == SUPER_ADMIN:
         cmd = (event.raw_text or "").lower().strip()
         if cmd == "/editon":
@@ -58,43 +58,45 @@ async def user_handler(event):
             IS_ENABLED = False
             await event.delete()
 
-# --- BOT HANDLER (Edit Guard - Sessiz Silici) ---
+# --- BOT HANDLER (Sessiz Silici) ---
 @bot_client.on(events.MessageEdited)
 async def bot_edit_handler(event):
     global IS_ENABLED
     if not IS_ENABLED: return
-    
-    # Konum mesajı istisnası (Pyrogram kodundaki gibi)
     if isinstance(event.media, types.MessageMediaGeo): return
 
     original = message_store.get(event.id)
     current = get_content_fingerprint(event)
 
-    # İçerik değişmediyse veya hafızada yoksa işlem yapma
     if not original or original == current: return
     
-    # Korumalı kelimeler (Editlense bile silinmez)
     protected = ["PLATE:", "ADMIN:", "UPDATE:", "STATUS:"]
     if any(word in (event.raw_text or "").upper() for word in protected): return
 
     try:
-        # BOT MESAJI SİLER (Sessizce)
+        # Silme işlemini TOKENLİ BOT yapar
         await bot_client.delete_messages(event.chat_id, event.id)
         message_store.pop(event.id, None)
     except:
         pass
 
-async def start_all():
-    # Userbot'u başlat
+async def main():
+    # Başlatma işlemleri
     await user_client.start()
-    print("Userbot ve Guard Bot aktif!")
-    # Her iki istemciyi de çalışır durumda tut
+    await bot_client.start(bot_token=BOT_TOKEN)
+    print("Sistem Başarıyla Başlatıldı!")
+    
+    # İki istemciyi aynı anda çalıştır
     await asyncio.gather(
         user_client.run_until_disconnected(),
         bot_client.run_until_disconnected()
     )
 
 if __name__ == '__main__':
+    # Flask (Web Server) ayrı bir kanalda çalışsın
     port = int(os.environ.get("PORT", 10000))
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port), daemon=True).start()
-    asyncio.run(start_all())
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port, use_reloader=False), daemon=True).start()
+    
+    # Ana asenkron döngüyü başlat
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
