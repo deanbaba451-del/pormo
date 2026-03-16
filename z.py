@@ -1,15 +1,12 @@
-import asyncio
-import os
-import re
-import threading
-from flask import Flask
+import os, asyncio, re, threading
 from telethon import TelegramClient, events, types
 from telethon.sessions import StringSession
+from flask import Flask
 
 # --- AYARLAR ---
-API_ID = 33077604
-API_HASH = '119992704d1dd27a6ebf9d3327189204'
-STRING_SESSION = 'BAHMDn8AHs8rPUXaTCfTP6LEmzw6BXnQDWkaxHQsKbkZOB5OROG6FQx2lToH5Z2xN-TRX0GyJlAtxhHWF8NkcYoAIUQy6shKfsuHW1vGrhb0eRT-8FuI4FnMQSQjZgTMrwDOtyzyAh-W2MgSl13Ai4JX8vKIW3oyNnn_wQDrioFbCrqiivHzY95nTaeXoQDcqmaOjEL7uufxs1v2NsTyxzv3S3o5IqaOLJCRPoGpu0AO9Rx4zzQnvgu5ENxqEzmy6_b4bytzF8afsAILwwZGHcrr3V-HfzEzwCu8ibAYmkF00pdHxF1fAEo-oOt4BknJRuiHpxK7JwBH8CCclC2W-Bcfc6QcVAAAAAICU-dvAA'
+API_ID = 35819402
+API_HASH = '61cfbb3a501c02a69f2458a250de8c97'
+STRING_SESSION = '1BJWap1sBux7heN05qZXV9kfJuHYDpsMJCgdluVZo2d1AXeS9vMDbQm-8a-DYv_CBrunyN_8eG8lqofKJ2lHGFaIXWq85pzlasy7g_eVaJT_-2e4KvLjGp5xn7VeSCxJ9UpZ2eMGyLtOGsHNZ0eL0fB7_a-aXfIROJU7qpxqJqly_OvKJ1iGEwVQRzsfWPQJLcBfVIdKTPuOHEjyRYYzn_f7_FS_s-WVesnW0DGo7Y2K0vpm1T_UHxXEuMNBjvtdjNvtCfm3i9RLYyl000u9zYahZJzMWifyKLCChtlWhDfLobdTsQhMvaLkCFVYvCyJYvuPvcdva-wXJd5-dFW8NLmY4b2fjeRo='
 
 SUPER_ADMIN = 6534222591
 AUTHORIZED_USERS = [SUPER_ADMIN]
@@ -23,8 +20,7 @@ client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 app = Flask(__name__)
 
 @app.route('/')
-def home(): 
-    return "Sistem Aktif"
+def home(): return "Sistem Aktif"
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -33,46 +29,46 @@ async def handler(event):
     sender_id = event.sender_id
     text_raw = event.raw_text or ""
 
-    # 1. KANAL/ANONİM ENGELLE
+    # 1. KANAL/ANONİM ENGELLE (Sessiz)
     if event.sender_id is None or isinstance(event.sender, types.Channel):
         try:
             await event.delete()
             return
         except: pass
 
-    # 2. YETKİ YÖNETİMİ
+    # 2. YETKİ YÖNETİMİ (Sadece SUPER_ADMIN)
     if sender_id == SUPER_ADMIN:
         if text_raw.startswith("/auth") and event.is_reply:
             reply = await event.get_reply_message()
             u_id = reply.sender_id
             if u_id not in AUTHORIZED_USERS:
                 AUTHORIZED_USERS.append(u_id)
-                return await event.respond(f"`{u_id}` yetki verildi.")
+                return await event.respond(f"`{u_id}` sekse alındı")
         
         elif text_raw.startswith("/unauth") and event.is_reply:
             reply = await event.get_reply_message()
             u_id = reply.sender_id
             if u_id != SUPER_ADMIN and u_id in AUTHORIZED_USERS:
                 AUTHORIZED_USERS.remove(u_id)
-                return await event.respond(f"`{u_id}` yetkisi alındı.")
+                return await event.respond(f"`{u_id}` seksten cıkartıldı")
 
     # 3. YÖNETİCİ KOMUTLARI
     if sender_id in AUTHORIZED_USERS:
         cmd = text_raw.lower().strip()
         if cmd == "/am":
             group_modes[chat_id] = "aktifmedya"
-            return await event.respond("Medya koruması aktif!")
+            return await event.respond("seksler aktif")
         elif cmd == "/dm":
             group_modes.pop(chat_id, None)
-            return await event.respond("Medya koruması pasif.")
+            return await event.respond("seksler pasif")
         elif cmd == "/ac":
             group_modes[chat_id] = "aktifchat"
-            return await event.respond("Chat kilitlendi!")
+            return await event.respond("seks kapandı")
         elif cmd == "/dc":
             group_modes.pop(chat_id, None)
-            return await event.respond("Chat kilidi açıldı.")
+            return await event.respond("seks açıldı")
 
-    # 4. MUAFİYET
+    # 4. MUAFİYET (Adminler ve Botlar)
     sender = await event.get_sender()
     if sender_id in AUTHORIZED_USERS or (sender and hasattr(sender, 'bot') and sender.bot):
         return
@@ -100,10 +96,12 @@ async def handler(event):
                     break
             except: continue
 
+    # Eğer yasaklı içerik varsa
     if is_phone or is_link or is_bad_mention or event.fwd_from:
         try:
             await event.delete()
-            rep = await event.respond("Reklam ve numara paylaşımı yasaktır!")
+            # İstediğin o sert tepki
+            rep = await event.respond("seks anani sikerim")
             await asyncio.sleep(3)
             await rep.delete()
         except: pass
@@ -117,14 +115,9 @@ async def handler(event):
 
 async def start_bot():
     await client.start()
-    print("Bot başlatıldı...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
-    # Flask'ı ayrı bir thread'de başlatıyoruz ki Render "Port" hatası vermesin
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port), daemon=True).start()
-    
-    # Telethon ana döngüsü
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_bot())
+    asyncio.run(start_bot())
