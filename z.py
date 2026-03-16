@@ -6,7 +6,8 @@ from flask import Flask
 # --- AYARLAR ---
 API_ID = 33077604
 API_HASH = '119992704d1dd27a6ebf9d3327189204'
-STRING_SESSION = 'BAHMDn8AHs8rPUXaTCfTP6LEmzw6BXnQDWkaxHQsKbkZOB5OROG6FQx2lToH5Z2xN-TRX0GyJlAtxhHWF8NkcYoAIUQy6shKfsuHW1vGrhb0eRT-8FuI4FnMQSQjZgTMrwDOtyzyAh-W2MgSl13Ai4JX8vKIW3oyNnn_wQDrioFbCrqiivHzY95nTaeXoQDcqmaOjEL7uufxs1v2NsTyxzv3S3o5IqaOLJCRPoGpu0AO9Rx4zzQnvgu5ENxqEzmy6_b4bytzF8afsAILwwZGHcrr3V-HfzEzwCu8ibAYmkF00pdHxF1fAEo-oOt4BknJRuiHpxK7JwBH8CCclC2W-Bcfc6QcVAAAAAICU-dvAA'
+# Session stringini buraya yapıştırırken tırnak içine almayı unutma
+RAW_SESSION = 'BAHMDn8AHs8rPUXaTCfTP6LEmzw6BXnQDWkaxHQsKbkZOB5OROG6FQx2lToH5Z2xN-TRX0GyJlAtxhHWF8NkcYoAIUQy6shKfsuHW1vGrhb0eRT-8FuI4FnMQSQjZgTMrwDOtyzyAh-W2MgSl13Ai4JX8vKIW3oyNnn_wQDrioFbCrqiivHzY95nTaeXoQDcqmaOjEL7uufxs1v2NsTyxzv3S3o5IqaOLJCRPoGpu0AO9Rx4zzQnvgu5ENxqEzmy6_b4bytzF8afsAILwwZGHcrr3V-HfzEzwCu8ibAYmkF00pdHxF1fAEo-oOt4BknJRuiHpxK7JwBH8CCclC2W-Bcfc6QcVAAAAAICU-dvAA'
 BOT_TOKEN = "8753063580:AAHCUjFkDAGSAoWVMvp5cF6F6rTzryEsMMA"
 
 SUPER_ADMIN = 6534222591
@@ -20,14 +21,17 @@ group_modes = {}
 PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}'
 LINK_PATTERN = r'(?:t\.me|telegram\.me)\/\w+'
 
-# İstemciler (Bot session'ı None yapıldı ki Render'da hata vermesin)
-user_client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
-bot_client = TelegramClient(None, API_ID, API_HASH) # Bellekte çalışır, dosya yazmaz
+# Temizlenmiş Session
+CLEAN_SESSION = StringSession(RAW_SESSION.strip())
+
+# İstemciler (Dosya oluşturmaz, tamamen RAM üzerinden çalışır)
+user_client = TelegramClient(CLEAN_SESSION, API_ID, API_HASH)
+bot_client = TelegramClient(None, API_ID, API_HASH)
 
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "Sessiz Bot Guard Aktif"
+def home(): return "Sessiz Muhafız Aktif"
 
 def get_content_fingerprint(event):
     text = event.raw_text or ""
@@ -46,9 +50,11 @@ async def user_handler(event):
     # Mesajı hafızaya al
     message_store[event.id] = get_content_fingerprint(event)
     if len(message_store) > 3000:
-        message_store.pop(next(iter(message_store)))
+        it = iter(message_store)
+        first_key = next(it)
+        message_store.pop(first_key)
 
-    # Komut Kontrol
+    # Yönetici Komutları (Sadece SuperAdmin)
     if event.sender_id == SUPER_ADMIN:
         cmd = (event.raw_text or "").lower().strip()
         if cmd == "/editon":
@@ -58,7 +64,7 @@ async def user_handler(event):
             IS_ENABLED = False
             await event.delete()
 
-# --- BOT HANDLER (Sessiz Silici) ---
+# --- BOT HANDLER (Sessiz Edit Guard) ---
 @bot_client.on(events.MessageEdited)
 async def bot_edit_handler(event):
     global IS_ENABLED
@@ -70,33 +76,33 @@ async def bot_edit_handler(event):
 
     if not original or original == current: return
     
+    # Korumalı kelimeler
     protected = ["PLATE:", "ADMIN:", "UPDATE:", "STATUS:"]
     if any(word in (event.raw_text or "").upper() for word in protected): return
 
     try:
-        # Silme işlemini TOKENLİ BOT yapar
+        # Silme işlemini BOT yapar (Sessizce)
         await bot_client.delete_messages(event.chat_id, event.id)
         message_store.pop(event.id, None)
     except:
         pass
 
 async def main():
-    # Başlatma işlemleri
+    # Userbot ve Bot'u başlat
     await user_client.start()
     await bot_client.start(bot_token=BOT_TOKEN)
-    print("Sistem Başarıyla Başlatıldı!")
+    print(">>> SİSTEM AKTİF: Dosya kullanılmıyor, her şey RAM üzerinden çalışıyor.")
     
-    # İki istemciyi aynı anda çalıştır
     await asyncio.gather(
         user_client.run_until_disconnected(),
         bot_client.run_until_disconnected()
     )
 
 if __name__ == '__main__':
-    # Flask (Web Server) ayrı bir kanalda çalışsın
+    # Flask sunucusu (Render'ın kapanmaması için)
     port = int(os.environ.get("PORT", 10000))
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port, use_reloader=False), daemon=True).start()
     
-    # Ana asenkron döngüyü başlat
+    # Ana döngüyü başlat
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
