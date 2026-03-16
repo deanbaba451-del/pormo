@@ -11,107 +11,100 @@ STRING_SESSION = 'BAHMDn8AHs8rPUXaTCfTP6LEmzw6BXnQDWkaxHQsKbkZOB5OROG6FQx2lToH5Z
 SUPER_ADMIN = 6534222591
 AUTHORIZED_USERS = [SUPER_ADMIN]
 
-PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}'
-MENTION_PATTERN = r'@(\w+)'
-LINK_PATTERN = r'(?:t\.me|telegram\.me)\/\w+'
+# --- EDİT GUARD DEĞİŞKENLERİ ---
+IS_ENABLED = True
+message_store = {}
 
+PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}'
+LINK_PATTERN = r'(?:t\.me|telegram\.me)\/\w+'
 group_modes = {}
+
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 app = Flask(__name__)
 
-@app.route('/')
-def home(): return "Sistem Aktif"
+def get_content_fingerprint(event):
+    text = event.raw_text or ""
+    media_id = "none"
+    if event.media:
+        if hasattr(event.media, 'photo'): media_id = f"ph_{event.media.photo.id}"
+        elif hasattr(event.media, 'document'): media_id = f"doc_{event.media.document.id}"
+    return f"{text}_{media_id}"
 
+@app.route('/')
+def home(): return "Sessiz Muhafız Aktif"
+
+# --- ANA HANDLER (Yeni Mesajlar ve Filtreler) ---
 @client.on(events.NewMessage)
 async def handler(event):
+    global IS_ENABLED
     if not event.chat: return
     chat_id = event.chat_id
     sender_id = event.sender_id
     text_raw = event.raw_text or ""
 
-    # 1. KANAL/ANONİM ENGELLE (Sessiz)
-    if event.sender_id is None or isinstance(event.sender, types.Channel):
-        try:
+    # Mesajı hafızaya al
+    message_store[event.id] = get_content_fingerprint(event)
+    if len(message_store) > 3000:
+        message_store.pop(next(iter(message_store)))
+
+    # Komutlar (Sadece SuperAdmin)
+    if sender_id == SUPER_ADMIN:
+        cmd = text_raw.lower().strip()
+        if cmd == "/editon":
+            IS_ENABLED = True
             await event.delete()
             return
-        except: pass
+        elif cmd == "/editoff":
+            IS_ENABLED = False
+            await event.delete()
+            return
 
-    # 2. YETKİ YÖNETİMİ (Sadece SUPER_ADMIN)
-    if sender_id == SUPER_ADMIN:
-        if text_raw.startswith("/auth") and event.is_reply:
-            reply = await event.get_reply_message()
-            u_id = reply.sender_id
-            if u_id not in AUTHORIZED_USERS:
-                AUTHORIZED_USERS.append(u_id)
-                return await event.respond(f"`{u_id}` sekse alındı")
-        
-        elif text_raw.startswith("/unauth") and event.is_reply:
-            reply = await event.get_reply_message()
-            u_id = reply.sender_id
-            if u_id != SUPER_ADMIN and u_id in AUTHORIZED_USERS:
-                AUTHORIZED_USERS.remove(u_id)
-                return await event.respond(f"`{u_id}` seksten cıkartıldı")
-
-    # 3. YÖNETİCİ KOMUTLARI
+    # Yönetici Komutları
     if sender_id in AUTHORIZED_USERS:
         cmd = text_raw.lower().strip()
-        if cmd == "/am":
-            group_modes[chat_id] = "aktifmedya"
-            return await event.respond("seksler aktif")
-        elif cmd == "/dm":
-            group_modes.pop(chat_id, None)
-            return await event.respond("seksler pasif")
-        elif cmd == "/ac":
-            group_modes[chat_id] = "aktifchat"
-            return await event.respond("seks kapandı")
-        elif cmd == "/dc":
-            group_modes.pop(chat_id, None)
-            return await event.respond("seks açıldı")
+        if cmd == "/am": group_modes[chat_id] = "aktifmedya"
+        elif cmd == "/dm": group_modes.pop(chat_id, None)
+        elif cmd == "/ac": group_modes[chat_id] = "aktifchat"
+        elif cmd == "/dc": group_modes.pop(chat_id, None)
 
-    # 4. MUAFİYET (Adminler ve Botlar)
+    # Muafiyet
     sender = await event.get_sender()
     if sender_id in AUTHORIZED_USERS or (sender and hasattr(sender, 'bot') and sender.bot):
         return
 
-    # 5. AKTİF CHAT KİLİDİ
-    current_mode = group_modes.get(chat_id)
-    if current_mode == "aktifchat":
+    # Reklam ve Medya Filtreleri (Sessiz Silme)
+    if group_modes.get(chat_id) == "aktifchat":
         try: await event.delete()
         except: pass
         return
 
-    # 6. REKLAM, NUMARA VE KANAL MENTION KONTROLÜ
-    text_lower = text_raw.lower()
-    is_phone = re.search(PHONE_PATTERN, text_lower)
-    is_link = re.search(LINK_PATTERN, text_lower)
-    mentions = re.findall(MENTION_PATTERN, text_raw)
-    
-    is_bad_mention = False
-    if mentions:
-        for m in mentions:
-            try:
-                entity = await client.get_entity(m)
-                if isinstance(entity, (types.Channel, types.Chat)):
-                    is_bad_mention = True
-                    break
-            except: continue
-
-    # Eğer yasaklı içerik varsa
-    if is_phone or is_link or is_bad_mention or event.fwd_from:
-        try:
-            await event.delete()
-            # İstediğin o sert tepki
-            rep = await event.respond("seks anani sikerim")
-            await asyncio.sleep(3)
-            await rep.delete()
+    if re.search(PHONE_PATTERN, text_raw) or re.search(LINK_PATTERN, text_raw.lower()) or event.fwd_from:
+        try: await event.delete()
         except: pass
-        return
 
-    # 7. MEDYA FİLTRESİ
-    if event.media and current_mode == "aktifmedya":
-        if not (event.voice or event.video_note):
-            try: await event.delete()
-            except: pass
+# --- EDİT HANDLER (Sessiz Edit Guard) ---
+@client.on(events.MessageEdited)
+async def handle_edits(event):
+    global IS_ENABLED
+    if not IS_ENABLED: return
+    if isinstance(event.media, types.MessageMediaGeo): return
+
+    original = message_store.get(event.id)
+    current = get_content_fingerprint(event)
+
+    if original and original == current: return
+    
+    # Korumalı kelimeler (Editlense bile silinmez)
+    protected = ["PLATE:", "ADMIN:", "UPDATE:", "STATUS:"]
+    txt_upper = (event.raw_text or "").upper()
+    if any(word in txt_upper for word in protected): return
+
+    try:
+        # Sessizce sil
+        await event.delete()
+        message_store.pop(event.id, None)
+    except:
+        pass
 
 async def start_bot():
     await client.start()
@@ -120,4 +113,4 @@ async def start_bot():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port), daemon=True).start()
-    asyncio.run(start_bot())
+    client.loop.run_until_complete(start_bot())
