@@ -6,7 +6,8 @@ from flask import Flask
 # --- AYARLAR ---
 API_ID = 20275001
 API_HASH = "26e474f4a17fe5b306cc6ecfd2a1ed55"
-SESSION_STRING = "BAE1XzkAQODlnE7Q5p49txSKPSdxVCdBv4ZnzUE1TGF9OGngoeZSgUoNg9AXyPbRMgmDsQ0hoyv9fVy8JnEu0SUs6DkcQ5i6GqNlQnfXM3pbMr4JNx8KilGKWgUcoU8FQm5EiWRQVTL-1xXGx1TxkoR_UYXeycIqvL4uVwvDSAVRaRCbwKgafBL49WPXoWq0HVpP46YBlT0ocjTeHIOUBKtnoAGQMQL079ok91BSbMOH0GXritBykHeCispbLyzRNt4KmSpLZlEKzkxlicYTvdDaPOzvmZRnnIUoASoi2YSCwe4Le0sR0YZ-P_5GvN-vm8CdmWa947-_ZSVxuCvGSXniz8yeFQAAAAHfRBiOAA"
+# Yeni aldığın sağlam session string:
+SESSION_STRING = "1BJWap1sBu1W8QENXChVH0Lw5lc6libhNH0YH0Tsp7PJuoWJLuJCzwPhgrwuVeYBGvJE4yv4b1-EkE-aAW2a4JJ6t0zP9LBljeeMSuB_I7AFXL0OJl_LskVt8Dzynwoy7g1Gvqt5_PwEfeoR0tw-wiR12RiaLrruZREGXV8J5Lakm-bfczlP5fv7LJf2c2LoXe9dc-DzizVM_-Hd8GoB59nefVZmw9PaM5ethKzNeWSvLzxMAF9S8iZrBhQQwnYakCUOX40GfkYvlzgSkV8UmPBOX0687ZRvvkSl7ExdnYaJG2I26-BtgY6ZtqEeDokOf6ksxdH65LEH6JqZeac1_IuO9wKbIMLc="
 
 SUPER_ADMIN = 6534222591
 AUTHORIZED_USERS = [SUPER_ADMIN]
@@ -24,7 +25,6 @@ app = Flask(__name__)
 @app.route('/')
 def home(): return "sistem aktif"
 
-# Mesajları 4 saniye sonra silen yardımcı fonksiyon
 async def self_destruct(event, wait=4):
     await asyncio.sleep(wait)
     try: await event.delete()
@@ -37,32 +37,23 @@ async def handler(event):
     sender_id = event.sender_id
     text_raw = event.raw_text or ""
 
-    # 1. KANAL/ANONİM ENGELLE (Sessiz)
     if event.sender_id is None or isinstance(event.sender, types.Channel):
         try: await event.delete()
         except: pass
         return
 
-    # Prefix Kontrolü
     is_command = any(text_raw.startswith(p) for p in PREFIX)
     
-    # 2. KOMUT DEĞİLSE FİLTRELERİ ÇALIŞTIR
     if not is_command:
         if sender_id in AUTHORIZED_USERS: return
-        
-        # Forward Koruması (Sessiz)
         if forward_protection.get(chat_id) and event.fwd_from:
             try: await event.delete()
             except: pass
             return
-
-        # Chat Kilidi (.won)
         if group_modes.get(chat_id) == "aktifchat":
             try: await event.delete()
             except: pass
             return
-
-        # Reklam/Link (Küfürlü Tepki + 4sn Silme)
         if re.search(PHONE_PATTERN, text_raw.lower()) or re.search(LINK_PATTERN, text_raw.lower()):
             try:
                 await event.delete()
@@ -70,15 +61,12 @@ async def handler(event):
                 asyncio.create_task(self_destruct(rep))
             except: pass
             return
-
-        # Medya Filtresi (.xon)
         if event.media and group_modes.get(chat_id) == "aktifmedya":
             if not (event.voice or event.video_note):
                 try: await event.delete()
                 except: pass
         return
 
-    # 3. YETKİLİ KOMUTLARI
     if sender_id in AUTHORIZED_USERS:
         parts = text_raw.split()
         cmd = parts[0][1:].lower() 
@@ -86,7 +74,6 @@ async def handler(event):
         response_text = None
         is_list_cmd = False 
 
-        # --- YETKİ YÖNETİMİ ---
         if sender_id == SUPER_ADMIN:
             target_id = None
             if event.is_reply:
@@ -127,7 +114,6 @@ async def handler(event):
                         auth_list_text += f"user: authorized | id: `{uid}`\n"
                 response_text = auth_list_text
 
-        # --- MOD KOMUTLARI ---
         if cmd == "xon":
             group_modes[chat_id] = "aktifmedya"
             response_text = "online"
@@ -149,10 +135,7 @@ async def handler(event):
 
         if response_text:
             rep = await event.respond(response_text)
-            # Komut mesajını her zaman sil (4 sn)
             asyncio.create_task(self_destruct(event))
-            
-            # Eğer authlist DEĞİLSE yanıtı da sil (4 sn)
             if not is_list_cmd:
                 asyncio.create_task(self_destruct(rep))
 
