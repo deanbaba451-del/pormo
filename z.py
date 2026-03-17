@@ -6,7 +6,6 @@ from flask import Flask
 # --- AYARLAR ---
 API_ID = 20275001
 API_HASH = "26e474f4a17fe5b306cc6ecfd2a1ed55"
-# Yeni aldığın sağlam session string:
 SESSION_STRING = "1BJWap1sBu1W8QENXChVH0Lw5lc6libhNH0YH0Tsp7PJuoWJLuJCzwPhgrwuVeYBGvJE4yv4b1-EkE-aAW2a4JJ6t0zP9LBljeeMSuB_I7AFXL0OJl_LskVt8Dzynwoy7g1Gvqt5_PwEfeoR0tw-wiR12RiaLrruZREGXV8J5Lakm-bfczlP5fv7LJf2c2LoXe9dc-DzizVM_-Hd8GoB59nefVZmw9PaM5ethKzNeWSvLzxMAF9S8iZrBhQQwnYakCUOX40GfkYvlzgSkV8UmPBOX0687ZRvvkSl7ExdnYaJG2I26-BtgY6ZtqEeDokOf6ksxdH65LEH6JqZeac1_IuO9wKbIMLc="
 
 SUPER_ADMIN = 6534222591
@@ -18,6 +17,7 @@ LINK_PATTERN = r'(?:t\.me|telegram\.me)\/\w+'
 
 group_modes = {}
 forward_protection = {} 
+channel_block = {} # .con modu için
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 app = Flask(__name__)
@@ -37,23 +37,35 @@ async def handler(event):
     sender_id = event.sender_id
     text_raw = event.raw_text or ""
 
+    # 1. KANAL / ANONİM KONTROLÜ (.con modu)
+    # sender_id None ise veya gönderen bir kanalsa
     if event.sender_id is None or isinstance(event.sender, types.Channel):
-        try: await event.delete()
-        except: pass
-        return
+        if channel_block.get(chat_id):
+            try:
+                await event.delete()
+                return
+            except: pass
 
     is_command = any(text_raw.startswith(p) for p in PREFIX)
-    
+    is_auth = sender_id in AUTHORIZED_USERS
+
+    # 2. KOMUT DEĞİLSE FİLTRELERİ ÇALIŞTIR
     if not is_command:
-        if sender_id in AUTHORIZED_USERS: return
+        if is_auth: return
+        
+        # Forward Koruması
         if forward_protection.get(chat_id) and event.fwd_from:
             try: await event.delete()
             except: pass
             return
+
+        # Chat Kilidi (.won)
         if group_modes.get(chat_id) == "aktifchat":
             try: await event.delete()
             except: pass
             return
+
+        # Reklam/Link (Küfürlü Tepki)
         if re.search(PHONE_PATTERN, text_raw.lower()) or re.search(LINK_PATTERN, text_raw.lower()):
             try:
                 await event.delete()
@@ -61,13 +73,17 @@ async def handler(event):
                 asyncio.create_task(self_destruct(rep))
             except: pass
             return
-        if event.media and group_modes.get(chat_id) == "aktifmedya":
+
+        # Medya Filtresi (.xon)
+        if group_modes.get(chat_id) == "aktifmedya" and event.media:
+            # Sadece ses ve video notuna izin ver, gerisini sil
             if not (event.voice or event.video_note):
                 try: await event.delete()
                 except: pass
         return
 
-    if sender_id in AUTHORIZED_USERS:
+    # 3. YETKİLİ KOMUTLARI
+    if is_auth:
         parts = text_raw.split()
         cmd = parts[0][1:].lower() 
         args = parts[1:]
@@ -114,6 +130,7 @@ async def handler(event):
                         auth_list_text += f"user: authorized | id: `{uid}`\n"
                 response_text = auth_list_text
 
+        # Komut İşlemleri
         if cmd == "xon":
             group_modes[chat_id] = "aktifmedya"
             response_text = "online"
@@ -131,6 +148,12 @@ async def handler(event):
             response_text = "online"
         elif cmd == "forwardoff":
             forward_protection[chat_id] = False
+            response_text = "offline"
+        elif cmd == "con": # Yeni Kanal Engelleme Aç
+            channel_block[chat_id] = True
+            response_text = "online"
+        elif cmd == "coff": # Yeni Kanal Engelleme Kapat
+            channel_block[chat_id] = False
             response_text = "offline"
 
         if response_text:
