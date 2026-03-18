@@ -16,8 +16,8 @@ PHONE_PATTERN = r'(?:\+|00)\d{1,4}\s?\(?\d{1,4}\)?[\s.-]?\d{1,4}[\s.-]?\d{1,9}'
 LINK_PATTERN = r'(?:t\.me|telegram\.me)\/(?:\+|joinchat|[\w-]+)'
 
 group_modes = {} 
-user_bans = {}   
-media_bans = {}  
+user_restrictions = {} # Tam engel listesi (res/restrict)
+user_mutes = {}        # Sadece metin engel listesi (mute)
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 app = Flask(__name__)
@@ -35,7 +35,6 @@ async def timer_off(chat_id, mode, minutes):
     if chat_id in group_modes and mode in group_modes[chat_id]:
         group_modes[chat_id].pop(mode)
 
-# --- HERKES İÇİN MEDYA SİLME (2 DAKİKA) ---
 async def auto_delete_media(event):
     await asyncio.sleep(120) 
     try: await event.delete()
@@ -52,7 +51,7 @@ async def handler(event):
     is_auth = sender_id in AUTHORIZED_USERS
     modes = group_modes.get(chat_id, {})
 
-    # 1. GENEL MEDYA TEMİZLİĞİ (Yetkili/Yetkisiz Herkes Dahil)
+    # 1. HERKES İÇİN MEDYA SİLME (2 Dakika)
     if event.media:
         asyncio.create_task(auto_delete_media(event))
 
@@ -61,103 +60,89 @@ async def handler(event):
         try: return await event.delete()
         except: pass
 
-    # 3. ÖZEL BAN KONTROLLERİ (Sadece yetkisizler için)
+    # 3. KİŞİYE ÖZEL ENGEL KONTROLLERİ
     if not is_auth:
-        if sender_id in user_bans.get(chat_id, []):
+        # Tam Engel (.res / .restrict)
+        if sender_id in user_restrictions.get(chat_id, []):
             try: return await event.delete()
             except: pass
         
-        if sender_id in media_bans.get(chat_id, []) and event.media:
+        # Sadece Metin Engeli (.mute)
+        if sender_id in user_mutes.get(chat_id, []):
             try: return await event.delete()
             except: pass
 
-        # 4. FİLTRELER
-        if not is_command:
-            if "won" in modes:
+    # 4. GENEL FİLTRELER
+    if not is_command and not is_auth:
+        if "won" in modes:
+            try: return await event.delete()
+            except: pass
+
+        if "ton" in modes:
+            if re.search(PHONE_PATTERN, text_raw) or re.search(LINK_PATTERN, text_raw.lower()):
                 try: return await event.delete()
                 except: pass
 
-            if "ton" in modes:
-                if re.search(PHONE_PATTERN, text_raw):
-                    try:
-                        await event.delete()
-                        return await event.respond("mention sharing a phone number is prohibited.")
-                    except: pass
-                if re.search(LINK_PATTERN, text_raw.lower()):
-                    try:
-                        await event.delete()
-                        return await event.respond("mention sharing groups or channels is prohibited.")
-                    except: pass
+        if "fwon" in modes and event.fwd_from:
+            try: return await event.delete()
+            except: pass
 
-            if "fwon" in modes and event.fwd_from:
-                try: return await event.delete()
-                except: pass
-
-            if "xon" in modes and event.media:
-                if not (event.voice or event.video_note):
-                    try: return await event.delete()
-                    except: pass
-
-    # 5. YETKİLİ KOMUTLARI (Sadece AUTHORIZED_USERS)
+    # 5. YETKİLİ KOMUTLARI
     if is_auth and is_command:
         parts = text_raw.split()
         cmd = parts[0][1:].lower()
         args = parts[1:]
-        res = None
+        res_msg = None
 
-        def get_duration():
-            try: return int(args[0]) if args else None
-            except: return None
-
-        # Mod Komut Eşleşmeleri
-        m_map = {
-            "ton":"ton", "toff":"ton", 
-            "xon":"xon", "xoff":"xon", 
-            "won":"won", "woff":"won", 
-            "con":"con", "coff":"con", 
-            "fwon":"fwon", "fwoff":"fwon"
-        }
+        # Mod Komutları (ton, won, xon, con, fwon)
+        m_map = {"ton":"ton", "toff":"ton", "xon":"xon", "xoff":"xon", "won":"won", "woff":"won", "con":"con", "coff":"con", "fwon":"fwon", "fwoff":"fwon"}
         
         if cmd in m_map:
             mode_key = m_map[cmd]
             if chat_id not in group_modes: group_modes[chat_id] = {}
-            
             if cmd.endswith("off"):
                 group_modes[chat_id].pop(mode_key, None)
-                res = f"{mode_key} offline"
+                res_msg = "off."
             else:
                 group_modes[chat_id][mode_key] = True
-                res = f"{mode_key} online"
-                dur = get_duration()
-                if dur:
-                    res += f" ({dur} min)"
+                res_msg = "on."
+                try:
+                    dur = int(args[0])
+                    res_msg += f" ({dur}m)"
                     asyncio.create_task(timer_off(chat_id, mode_key, dur))
+                except: pass
 
-        # Kişisel Ban Komutları
-        elif cmd in ["tban", "tunban", "mban", "munban"]:
+        # KİŞİ ENGELLEME KOMUTLARI
+        elif cmd in ["res", "restrict", "deres", "derestrict", "mute", "unmute"]:
             target = None
             if event.is_reply:
                 rep = await event.get_reply_message()
                 target = rep.sender_id
             
             if target:
-                if cmd == "tban":
-                    if chat_id not in user_bans: user_bans[chat_id] = []
-                    user_bans[chat_id].append(target)
-                    res = "user text banned."
-                elif cmd == "tunban":
-                    if target in user_bans.get(chat_id, []): user_bans[chat_id].remove(target)
-                    res = "user text ban lifted."
-                elif cmd == "mban":
-                    if chat_id not in media_bans: media_bans[chat_id] = []
-                    media_bans[chat_id].append(target)
-                    res = "user media banned."
-                elif cmd == "munban":
-                    if target in media_bans.get(chat_id, []): media_bans[chat_id].remove(target)
-                    res = "user media ban lifted."
+                # Tam Engel Aç
+                if cmd in ["res", "restrict"]:
+                    if chat_id not in user_restrictions: user_restrictions[chat_id] = []
+                    if target not in user_restrictions[chat_id]: user_restrictions[chat_id].append(target)
+                    res_msg = "restricted."
+                
+                # Tam Engel Kaldır
+                elif cmd in ["deres", "derestrict"]:
+                    if target in user_restrictions.get(chat_id, []): user_restrictions[chat_id].remove(target)
+                    res_msg = "cleared."
+                
+                # Sadece Mute
+                elif cmd == "mute":
+                    if chat_id not in user_mutes: user_mutes[chat_id] = []
+                    if target not in user_mutes[chat_id]: user_mutes[chat_id].append(target)
+                    res_msg = "muted."
+                
+                elif cmd == "unmute":
+                    if target in user_mutes.get(chat_id, []): user_mutes[chat_id].remove(target)
+                    res_msg = "unmuted."
 
-        if res:
-            sent = await event.respond(res)
+        if res_msg:
+            sent = await event.respond(res_msg)
             asyncio.create_task(self_destruct(event))
             asyncio.create_task(self_destruct(sent))
 
