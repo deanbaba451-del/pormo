@@ -1,5 +1,6 @@
 import asyncio
 from flask import Flask
+from threading import Thread
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
@@ -40,15 +41,18 @@ async def temizle(e):
         except:
             pass
 
-async def main():
-    # Flask'ı botun döngüsüne bağla
-    from threading import Thread
-    Thread(target=lambda: app.run(host='0.0.0.0', port=8080, use_reloader=False)).start()
+def flask_thread():
+    app.run(host='0.0.0.0', port=8080)
+
+async def start_everything():
+    # Flask'ı arka planda başlat
+    Thread(target=flask_thread, daemon=True).start()
     
+    # Botu başlat
     await client.start()
-    print("Bot Hazir")
+    print("Bot aktif.")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    # Yeni nesil asyncio çalıştırma yöntemi
+    asyncio.run(start_everything())
