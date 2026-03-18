@@ -1,4 +1,4 @@
-import os, asyncio, re, threading, time
+Import os, asyncio, re, threading
 from telethon import TelegramClient, events, types
 from telethon.sessions import StringSession
 from flask import Flask
@@ -6,39 +6,22 @@ from flask import Flask
 # --- AYARLAR ---
 API_ID = 20275001
 API_HASH = "26e474f4a17fe5b306cc6ecfd2a1ed55"
-SESSION_STRING = "1BJWap1sBu1W8QENXChVH0Lw5lc6libhNH0YH0Tsp7PJuoWJLuJCzwPhgrwuVeYBGvJE4yv4b1-EkE-aAW2a4JJ6t0zP9LBljeeMSuB_I7AFXL0OJl_LskVt8Dzynwoy7g1Gvqt5_PwEfeoR0tw-wiR12RiaLrruZREGXV8J5Lakm-bfczlP5fv7LJf2c2LoXe9dc-DzizVM_-Hd8GoB59nefVZmw9PaM5ethKzNeWSvLzxMAF9S8iZrBhQQwnYakCUOX40GfkYvlzgSkV8UmPBOX0687ZRvvkSl7ExdnYaJG2I26-BtgY6ZtqEeDokOf6ksxdH65LEH6JqZeac1_IuO9wKbIMLc="
+BOT_TOKEN = "8579539233:AAGX9Dd0hTGV2_yhBbyzr7n7xbBMym7152Y"
+SESSION_STRING = "BAE1XzkAQODlnE7Q5p49txSKPSdxVCdBv4ZnzUE1TGF9OGngoeZSgUoNg9AXyPbRMgmDsQ0hoyv9fVy8JnEu0SUs6DkcQ5i6GqNlQnfXM3pbMr4JNx8KilGKWgUcoU8FQm5EiWRQVTL-1xXGx1TxkoR_UYXeycIqvL4uVwvDSAVRaRCbwKgafBL49WPXoWq0HVpP46YBlT0ocjTeHIOUBKtnoAGQMQL079ok91BSbMOH0GXritBykHeCispbLyzRNt4KmSpLZlEKzkxlicYTvdDaPOzvmZRnnIUoASoi2YSCwe4Le0sR0YZ-P_5GvN-vm8CdmWa947-_ZSVxuCvGSXniz8yeFQAAAAHfRBiOAA"
 
 SUPER_ADMIN = 6534222591
 AUTHORIZED_USERS = [SUPER_ADMIN]
-PREFIX = [".", "/"] 
 
-PHONE_PATTERN = r'(?:\+|00)\d{1,4}\s?\(?\d{1,4}\)?[\s.-]?\d{1,4}[\s.-]?\d{1,9}'
-LINK_PATTERN = r'(?:t\.me|telegram\.me)\/(?:\+|joinchat|[\w-]+)'
+PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}'
+MENTION_PATTERN = r'@(\w+)'
+LINK_PATTERN = r'(?:t\.me|telegram\.me)\/\w+'
 
-group_modes = {} 
-user_restrictions = {} # Tam engel listesi (res/restrict)
-user_mutes = {}        # Sadece metin engel listesi (mute)
-
-client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+group_modes = {}
+client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "sistem aktif"
-
-async def self_destruct(event, wait=4):
-    await asyncio.sleep(wait)
-    try: await event.delete()
-    except: pass
-
-async def timer_off(chat_id, mode, minutes):
-    await asyncio.sleep(minutes * 60)
-    if chat_id in group_modes and mode in group_modes[chat_id]:
-        group_modes[chat_id].pop(mode)
-
-async def auto_delete_media(event):
-    await asyncio.sleep(120) 
-    try: await event.delete()
-    except: pass
+def home(): return "Sistem Aktif"
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -46,105 +29,90 @@ async def handler(event):
     chat_id = event.chat_id
     sender_id = event.sender_id
     text_raw = event.raw_text or ""
-    
-    is_command = any(text_raw.startswith(p) for p in PREFIX)
-    is_auth = sender_id in AUTHORIZED_USERS
-    modes = group_modes.get(chat_id, {})
 
-    # 1. HERKES İÇİN MEDYA SİLME (2 Dakika)
-    if event.media:
-        asyncio.create_task(auto_delete_media(event))
-
-    # 2. KANAL / ANONİM KONTROLÜ
-    if (event.sender_id is None or isinstance(event.sender, types.Channel)) and "con" in modes:
-        try: return await event.delete()
+    # 1. KANAL/ANONİM ENGELLE (Sessiz)
+    if event.sender_id is None or isinstance(event.sender, types.Channel):
+        try:
+            await event.delete()
+            return
         except: pass
 
-    # 3. KİŞİYE ÖZEL ENGEL KONTROLLERİ
-    if not is_auth:
-        # Tam Engel (.res / .restrict)
-        if sender_id in user_restrictions.get(chat_id, []):
-            try: return await event.delete()
-            except: pass
+    # 2. YETKİ YÖNETİMİ (Sadece SUPER_ADMIN)
+    if sender_id == SUPER_ADMIN:
+        if text_raw.startswith("/auth") and event.is_reply:
+            reply = await event.get_reply_message()
+            u_id = reply.sender_id
+            if u_id not in AUTHORIZED_USERS:
+                AUTHORIZED_USERS.append(u_id)
+                return await event.respond(f"`{u_id}` sekse alındı")
         
-        # Sadece Metin Engeli (.mute)
-        if sender_id in user_mutes.get(chat_id, []):
-            try: return await event.delete()
+        elif text_raw.startswith("/unauth") and event.is_reply:
+            reply = await event.get_reply_message()
+            u_id = reply.sender_id
+            if u_id != SUPER_ADMIN and u_id in AUTHORIZED_USERS:
+                AUTHORIZED_USERS.remove(u_id)
+                return await event.respond(f"`{u_id}` seksten cıkartıldı")
+
+    # 3. YÖNETİCİ KOMUTLARI
+    if sender_id in AUTHORIZED_USERS:
+        cmd = text_raw.lower().strip()
+        if cmd == "/am":
+            group_modes[chat_id] = "aktifmedya"
+            return await event.respond("seksler aktif")
+        elif cmd == "/dm":
+            group_modes.pop(chat_id, None)
+            return await event.respond("seksler pasif")
+        elif cmd == "/ac":
+            group_modes[chat_id] = "aktifchat"
+            return await event.respond("seks kapandı")
+        elif cmd == "/dc":
+            group_modes.pop(chat_id, None)
+            return await event.respond("seks açıldı")
+
+    # 4. MUAFİYET (Adminler ve Botlar)
+    sender = await event.get_sender()
+    if sender_id in AUTHORIZED_USERS or (sender and hasattr(sender, 'bot') and sender.bot):
+        return
+
+    # 5. AKTİF CHAT KİLİDİ
+    current_mode = group_modes.get(chat_id)
+    if current_mode == "aktifchat":
+        try: await event.delete()
+        except: pass
+        return
+
+    # 6. REKLAM, NUMARA VE KANAL MENTION KONTROLÜ
+    text_lower = text_raw.lower()
+    is_phone = re.search(PHONE_PATTERN, text_lower)
+    is_link = re.search(LINK_PATTERN, text_lower)
+    mentions = re.findall(MENTION_PATTERN, text_raw)
+    
+    is_bad_mention = False
+    if mentions:
+        for m in mentions:
+            try:
+                entity = await client.get_entity(m)
+                if isinstance(entity, (types.Channel, types.Chat)):
+                    is_bad_mention = True
+                    break
+            except: continue
+
+    # Eğer yasaklı içerik varsa
+    if is_phone or is_link or is_bad_mention or event.fwd_from:
+        try:
+            await event.delete()
+            # İstediğin o sert tepki
+            rep = await event.respond("seks anani sikerim")
+            await asyncio.sleep(3)
+            await rep.delete()
+        except: pass
+        return
+
+    # 7. MEDYA FİLTRESİ
+    if event.media and current_mode == "aktifmedya":
+        if not (event.voice or event.video_note):
+            try: await event.delete()
             except: pass
-
-    # 4. GENEL FİLTRELER
-    if not is_command and not is_auth:
-        if "won" in modes:
-            try: return await event.delete()
-            except: pass
-
-        if "ton" in modes:
-            if re.search(PHONE_PATTERN, text_raw) or re.search(LINK_PATTERN, text_raw.lower()):
-                try: return await event.delete()
-                except: pass
-
-        if "fwon" in modes and event.fwd_from:
-            try: return await event.delete()
-            except: pass
-
-    # 5. YETKİLİ KOMUTLARI
-    if is_auth and is_command:
-        parts = text_raw.split()
-        cmd = parts[0][1:].lower()
-        args = parts[1:]
-        res_msg = None
-
-        # Mod Komutları (ton, won, xon, con, fwon)
-        m_map = {"ton":"ton", "toff":"ton", "xon":"xon", "xoff":"xon", "won":"won", "woff":"won", "con":"con", "coff":"con", "fwon":"fwon", "fwoff":"fwon"}
-        
-        if cmd in m_map:
-            mode_key = m_map[cmd]
-            if chat_id not in group_modes: group_modes[chat_id] = {}
-            if cmd.endswith("off"):
-                group_modes[chat_id].pop(mode_key, None)
-                res_msg = "off."
-            else:
-                group_modes[chat_id][mode_key] = True
-                res_msg = "on."
-                try:
-                    dur = int(args[0])
-                    res_msg += f" ({dur}m)"
-                    asyncio.create_task(timer_off(chat_id, mode_key, dur))
-                except: pass
-
-        # KİŞİ ENGELLEME KOMUTLARI
-        elif cmd in ["res", "restrict", "deres", "derestrict", "mute", "unmute"]:
-            target = None
-            if event.is_reply:
-                rep = await event.get_reply_message()
-                target = rep.sender_id
-            
-            if target:
-                # Tam Engel Aç
-                if cmd in ["res", "restrict"]:
-                    if chat_id not in user_restrictions: user_restrictions[chat_id] = []
-                    if target not in user_restrictions[chat_id]: user_restrictions[chat_id].append(target)
-                    res_msg = "restricted."
-                
-                # Tam Engel Kaldır
-                elif cmd in ["deres", "derestrict"]:
-                    if target in user_restrictions.get(chat_id, []): user_restrictions[chat_id].remove(target)
-                    res_msg = "cleared."
-                
-                # Sadece Mute
-                elif cmd == "mute":
-                    if chat_id not in user_mutes: user_mutes[chat_id] = []
-                    if target not in user_mutes[chat_id]: user_mutes[chat_id].append(target)
-                    res_msg = "muted."
-                
-                elif cmd == "unmute":
-                    if target in user_mutes.get(chat_id, []): user_mutes[chat_id].remove(target)
-                    res_msg = "unmuted."
-
-        if res_msg:
-            sent = await event.respond(res_msg)
-            asyncio.create_task(self_destruct(event))
-            asyncio.create_task(self_destruct(sent))
 
 async def start_bot():
     await client.start()
