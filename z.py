@@ -1,4 +1,4 @@
-import os, asyncio, re, threading
+import os, asyncio, re, threading, time
 from telethon import TelegramClient, events, types
 from telethon.sessions import StringSession
 from flask import Flask
@@ -25,20 +25,21 @@ app = Flask(__name__)
 @app.route('/')
 def home(): return "sistem aktif"
 
-# Genel silme fonksiyonu
 async def self_destruct(event, wait=4):
     await asyncio.sleep(wait)
     try: await event.delete()
     except: pass
 
-# --- MEDYA TEMİZLEME FONKSİYONU ---
-# Gruptaki her medyayı 2 dakika (120 saniye) sonra siler
+async def timer_off(chat_id, mode, minutes):
+    await asyncio.sleep(minutes * 60)
+    if chat_id in group_modes and mode in group_modes[chat_id]:
+        group_modes[chat_id].pop(mode)
+
+# --- HERKES İÇİN MEDYA SİLME (2 DAKİKA) ---
 async def auto_delete_media(event):
-    await asyncio.sleep(120) # 2 Dakika bekle
-    try:
-        await event.delete()
-    except:
-        pass
+    await asyncio.sleep(120) 
+    try: await event.delete()
+    except: pass
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -51,17 +52,16 @@ async def handler(event):
     is_auth = sender_id in AUTHORIZED_USERS
     modes = group_modes.get(chat_id, {})
 
-    # --- KOMUTSUZ MEDYA SİLME (2 Dakika Kuralı) ---
-    # Eğer mesaj bir medya içeriyorsa ve gönderen yetkili değilse zamanlayıcıyı başlat
-    if event.media and not is_auth:
+    # 1. GENEL MEDYA TEMİZLİĞİ (Yetkili/Yetkisiz Herkes Dahil)
+    if event.media:
         asyncio.create_task(auto_delete_media(event))
 
-    # KANAL / ANONİM KONTROLÜ
+    # 2. KANAL / ANONİM KONTROLÜ
     if (event.sender_id is None or isinstance(event.sender, types.Channel)) and "con" in modes:
         try: return await event.delete()
         except: pass
 
-    # ÖZEL BAN KONTROLLERİ
+    # 3. ÖZEL BAN KONTROLLERİ (Sadece yetkisizler için)
     if not is_auth:
         if sender_id in user_bans.get(chat_id, []):
             try: return await event.delete()
@@ -71,29 +71,34 @@ async def handler(event):
             try: return await event.delete()
             except: pass
 
-    # FİLTRELER
-    if not is_command and not is_auth:
-        if "won" in modes:
-            try: return await event.delete()
-            except: pass
-
-        if "ton" in modes:
-            if re.search(PHONE_PATTERN, text_raw):
-                try:
-                    await event.delete()
-                    return await event.respond("mention sharing a phone number is prohibited.")
-                except: pass
-            if re.search(LINK_PATTERN, text_raw.lower()):
-                try:
-                    await event.delete()
-                    return await event.respond("mention sharing groups or channels is prohibited.")
+        # 4. FİLTRELER
+        if not is_command:
+            if "won" in modes:
+                try: return await event.delete()
                 except: pass
 
-        if "fwon" in modes and event.fwd_from:
-            try: return await event.delete()
-            except: pass
+            if "ton" in modes:
+                if re.search(PHONE_PATTERN, text_raw):
+                    try:
+                        await event.delete()
+                        return await event.respond("mention sharing a phone number is prohibited.")
+                    except: pass
+                if re.search(LINK_PATTERN, text_raw.lower()):
+                    try:
+                        await event.delete()
+                        return await event.respond("mention sharing groups or channels is prohibited.")
+                    except: pass
 
-    # YETKİLİ KOMUTLARI
+            if "fwon" in modes and event.fwd_from:
+                try: return await event.delete()
+                except: pass
+
+            if "xon" in modes and event.media:
+                if not (event.voice or event.video_note):
+                    try: return await event.delete()
+                    except: pass
+
+    # 5. YETKİLİ KOMUTLARI (Sadece AUTHORIZED_USERS)
     if is_auth and is_command:
         parts = text_raw.split()
         cmd = parts[0][1:].lower()
@@ -104,22 +109,29 @@ async def handler(event):
             try: return int(args[0]) if args else None
             except: return None
 
-        # Mod Komutları
-        m_list = {"ton":"ton", "toff":"ton", "xon":"xon", "xoff":"xon", "won":"won", "woff":"won", "con":"con", "coff":"con", "fwon":"fwon", "fwoff":"fwon"}
+        # Mod Komut Eşleşmeleri
+        m_map = {
+            "ton":"ton", "toff":"ton", 
+            "xon":"xon", "xoff":"xon", 
+            "won":"won", "woff":"won", 
+            "con":"con", "coff":"con", 
+            "fwon":"fwon", "fwoff":"fwon"
+        }
         
-        if cmd in m_list:
-            mode_key = m_list[cmd]
+        if cmd in m_map:
+            mode_key = m_map[cmd]
             if chat_id not in group_modes: group_modes[chat_id] = {}
+            
             if cmd.endswith("off"):
                 group_modes[chat_id].pop(mode_key, None)
-                res = "offline"
+                res = f"{mode_key} offline"
             else:
                 group_modes[chat_id][mode_key] = True
-                res = "online"
+                res = f"{mode_key} online"
                 dur = get_duration()
                 if dur:
-                    res = f"online ({dur} min)"
-                    # Timer logic buraya eklenebilir (önceki kodda olduğu gibi)
+                    res += f" ({dur} min)"
+                    asyncio.create_task(timer_off(chat_id, mode_key, dur))
 
         # Kişisel Ban Komutları
         elif cmd in ["tban", "tunban", "mban", "munban"]:
