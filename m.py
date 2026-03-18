@@ -1,81 +1,52 @@
-import os
 import asyncio
+from flask import Flask
+from threading import Thread
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from flask import Flask
-import threading
 
 # --- AYARLAR ---
-API_ID = 35819402
-API_HASH = '61cfbb3a501c02a69f2458a250de8c97'
-STRING_SESSION = '1BJWap1sBu2WXMCBnEwAlcTBvFe5m3qWws8Yu6L7xhKgZyiJPxilJSXzv1wB6z4zHaWfSuTVOHEftRNljNMpe3VVt7D5MZTNGRxDjWObbPVST4dqw2GtpM3kC3npiFQvKHIV3zJwG1OAWFeW5XqmXeOAcKxg73PrxPBqTZVwYfQdWWVKTQc1r7NF_NNmLM1xa4s559jQzXUU6gJlbgoPHwKsTpjTZvTEIQlcRGd1Cj77GzBxEAoVQX9dTxgc5OxmoUMM85XIm6y8JWPSlSn3p9Kz12bCQv-H-ThL9iZMYJzN1C9RE4wAJ3hvISmu8QeC5ogkUKa_Ek-hiuwltf5V5geLReKcUb3Q='
+API_ID = 20275001
+API_HASH = "26e474f4a17fe5b306cc6ecfd2a1ed55"
+SESSION = "1BJWap1wBu6BWmzbKhuKET-vgh7kHrYnmrAFbQzQHw6DZaHu_61YMZCiB_DJakE5TVHGuxEasypULtDEMBan-VnxS105s04bMvdgVjYz6XW65Jk2njBCe1xdZbVb3Mikrkcao4MgyGuWtNEvJPQoLl9X3m7jw4EtJoNQ16_ovggEhvgPqZyWbEym2gJ9U7m3zJgu5CmviSLAUKPIHvb2Dreu1QFrK1__SBZiNXGz-RU3tGcgxLSLre_EyFq7Px-4BNVY9qgwrJnpdet7_OqzGXLW4EHBow5IkhAZgxGltFOHsvSDKYNfT_LYJXlA06emAxNwGGz9q72GJ3XEQWZLOmi62KdASAbI="
+ADMIN = 6534222591
 
-AUTHORIZED_USERS = [8256872080, 6534222591, 7727812432, 8343507331]
+app = Flask('')
+# Aktif nuke olan chatleri tutan liste
+active_nukes = set()
 
-# Durum Değişkenleri
-mode = "normal" 
-
-client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
-app = Flask(__name__)
+client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
 
 @app.route('/')
 def home():
-    return "Bot Aktif ve 7/24 Calisiyor"
+    return "online"
 
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+# Komutu sadece sen veya süper admin verebilir
+@client.on(events.NewMessage(pattern=r'\.b'))
+async def b_handler(e):
+    if e.out or e.sender_id == ADMIN:
+        active_nukes.add(e.chat_id)
+        await e.edit("online")
+
+@client.on(events.NewMessage(pattern=r'\.i'))
+async def i_handler(e):
+    if e.out or e.sender_id == ADMIN:
+        if e.chat_id in active_nukes:
+            active_nukes.remove(e.chat_id)
+        await e.edit("offline")
 
 @client.on(events.NewMessage)
-async def handler(event):
-    global mode
-    sender_id = event.sender_id
-    text = event.raw_text.lower() if event.raw_text else ""
-
-    # --- KOMUT KONTROLÜ (SADECE YETKİLİLER) ---
-    if sender_id in AUTHORIZED_USERS:
-        if text == "/aktifmedya":
-            mode = "aktifmedya"
-            await event.respond("🛡 **Medya Filtresi Aktif:** Sadece ses ve metin atılabilir.")
-            return
-        elif text == "/durmedya" or text == "/durchat":
-            mode = "normal"
-            await event.respond("✅ **Filtreler Kapatıldı:** Her şey serbest.")
-            return
-        elif text == "/aktifchat":
-            mode = "aktifchat"
-            await event.respond("🚫 **Chat Kilitlendi:** Tüm yeni mesajlar temizlenecek.")
-            return
-
-    # --- FİLTRELEME MANTIĞI ---
-    if mode == "aktifmedya":
-        # Sadece düz metin mi yoksa ses dosyası mı kontrolü
-        is_text = event.text and not event.media
-        is_voice = event.voice or event.audio
-        
-        if not (is_text or is_voice):
-            try:
-                await event.delete()
-            except:
-                pass
-
-    elif mode == "aktifchat":
-        # Yetkili biri durdurma komutu vermediyse her şeyi siler
-        if not (sender_id in AUTHORIZED_USERS and text == "/durchat"):
-            try:
-                await event.delete()
-            except:
-                pass
+async def temizle(e):
+    # Eğer bu chat_id nuke listesindeyse VE mesaj senden/adminden değilse sil
+    if e.chat_id in active_nukes and not e.out and e.sender_id != ADMIN:
+        try:
+            await e.delete()
+        except:
+            pass
 
 async def start_bot():
     await client.start()
-    print("Bot basariyla baslatildi!")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # Render'ı uyanık tutmak için Flask thread'i
-    threading.Thread(target=run_flask, daemon=True).start()
-    
-    # Ana bot döngüsü
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_bot())
+    Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
+    asyncio.run(start_bot())
