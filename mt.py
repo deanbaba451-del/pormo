@@ -1,4 +1,5 @@
 import asyncio
+import os
 from flask import Flask
 from threading import Thread
 from telethon import TelegramClient, events
@@ -15,43 +16,47 @@ nuke = False
 
 @app.route('/')
 def home():
-    return "Bot Aktif"
+    return "online"
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-# Client tanımlama (Hata almamak için loop içinde başlatılacak)
+# Botu global tanımla
 client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
 
 @client.on(events.NewMessage(outgoing=True, pattern=r'\.b'))
-async def b_cmd(e):
+async def b_handler(e):
     global nuke
     nuke = True
     await e.edit("online")
 
 @client.on(events.NewMessage(outgoing=True, pattern=r'\.i'))
-async def i_cmd(e):
+async def i_handler(e):
     global nuke
     nuke = False
     await e.edit("offline")
 
 @client.on(events.NewMessage)
-async def temizle(e):
+async def temizleyici(e):
     global nuke
+    # Nuke açıkken ve mesajı atan sen değilsen (veya süper admin değilse) sil
     if nuke and e.sender_id != ADMIN:
         try:
             await e.delete()
         except:
             pass
 
-async def main():
-    # Botu başlat
+async def start_bot():
     await client.start()
-    print("Bot baslatildi.")
+    print("Bot hazir!")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # Flask'ı ayrı thread'de başlat
-    Thread(target=run_flask, daemon=True).start()
-    # Ana döngüyü çalıştır
-    asyncio.run(main())
+    # Flask'ı arka planda başlat
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+    
+    # Botu ana döngüde çalıştır
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_bot())
