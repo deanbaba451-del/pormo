@@ -12,12 +12,12 @@ SUPER_ADMIN = 6534222591
 AUTHORIZED_USERS = [SUPER_ADMIN]
 PREFIX = [".", "/"] 
 
-PHONE_PATTERN = r'(?:\+90|0)?\s*[5]\d{2}\s*\d{3}\s*\d{2}\s*\d{2}'
-LINK_PATTERN = r'(?:t\.me|telegram\.me)\/\w+'
+PHONE_PATTERN = r'(?:\+|00)\d{1,4}\s?\(?\d{1,4}\)?[\s.-]?\d{1,4}[\s.-]?\d{1,9}'
+LINK_PATTERN = r'(?:t\.me|telegram\.me)\/(?:\+|joinchat|[\w-]+)'
 
-group_modes = {}
-forward_protection = {} 
-channel_block = {} # .con modu için
+group_modes = {} 
+user_bans = {}   
+media_bans = {}  
 
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 app = Flask(__name__)
@@ -25,10 +25,20 @@ app = Flask(__name__)
 @app.route('/')
 def home(): return "sistem aktif"
 
+# Genel silme fonksiyonu
 async def self_destruct(event, wait=4):
     await asyncio.sleep(wait)
     try: await event.delete()
     except: pass
+
+# --- MEDYA TEMİZLEME FONKSİYONU ---
+# Gruptaki her medyayı 2 dakika (120 saniye) sonra siler
+async def auto_delete_media(event):
+    await asyncio.sleep(120) # 2 Dakika bekle
+    try:
+        await event.delete()
+    except:
+        pass
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -36,131 +46,108 @@ async def handler(event):
     chat_id = event.chat_id
     sender_id = event.sender_id
     text_raw = event.raw_text or ""
-
-    # 1. KANAL / ANONİM KONTROLÜ (.con modu)
-    # sender_id None ise veya gönderen bir kanalsa
-    if event.sender_id is None or isinstance(event.sender, types.Channel):
-        if channel_block.get(chat_id):
-            try:
-                await event.delete()
-                return
-            except: pass
-
+    
     is_command = any(text_raw.startswith(p) for p in PREFIX)
     is_auth = sender_id in AUTHORIZED_USERS
+    modes = group_modes.get(chat_id, {})
 
-    # 2. KOMUT DEĞİLSE FİLTRELERİ ÇALIŞTIR
-    if not is_command:
-        if is_auth: return
+    # --- KOMUTSUZ MEDYA SİLME (2 Dakika Kuralı) ---
+    # Eğer mesaj bir medya içeriyorsa ve gönderen yetkili değilse zamanlayıcıyı başlat
+    if event.media and not is_auth:
+        asyncio.create_task(auto_delete_media(event))
+
+    # KANAL / ANONİM KONTROLÜ
+    if (event.sender_id is None or isinstance(event.sender, types.Channel)) and "con" in modes:
+        try: return await event.delete()
+        except: pass
+
+    # ÖZEL BAN KONTROLLERİ
+    if not is_auth:
+        if sender_id in user_bans.get(chat_id, []):
+            try: return await event.delete()
+            except: pass
         
-        # Forward Koruması
-        if forward_protection.get(chat_id) and event.fwd_from:
-            try: await event.delete()
+        if sender_id in media_bans.get(chat_id, []) and event.media:
+            try: return await event.delete()
             except: pass
-            return
 
-        # Chat Kilidi (.won)
-        if group_modes.get(chat_id) == "aktifchat":
-            try: await event.delete()
+    # FİLTRELER
+    if not is_command and not is_auth:
+        if "won" in modes:
+            try: return await event.delete()
             except: pass
-            return
 
-        # Reklam/Link (Küfürlü Tepki)
-        if re.search(PHONE_PATTERN, text_raw.lower()) or re.search(LINK_PATTERN, text_raw.lower()):
-            try:
-                await event.delete()
-                rep = await event.respond("seks anani sikerim")
-                asyncio.create_task(self_destruct(rep))
-            except: pass
-            return
-
-        # Medya Filtresi (.xon)
-        if group_modes.get(chat_id) == "aktifmedya" and event.media:
-            # Sadece ses ve video notuna izin ver, gerisini sil
-            if not (event.voice or event.video_note):
-                try: await event.delete()
-                except: pass
-        return
-
-    # 3. YETKİLİ KOMUTLARI
-    if is_auth:
-        parts = text_raw.split()
-        cmd = parts[0][1:].lower() 
-        args = parts[1:]
-        response_text = None
-        is_list_cmd = False 
-
-        if sender_id == SUPER_ADMIN:
-            target_id = None
-            if event.is_reply:
-                reply = await event.get_reply_message()
-                target_id = reply.sender_id
-            elif args:
+        if "ton" in modes:
+            if re.search(PHONE_PATTERN, text_raw):
                 try:
-                    user_entity = await client.get_entity(args[0])
-                    target_id = user_entity.id
+                    await event.delete()
+                    return await event.respond("mention sharing a phone number is prohibited.")
+                except: pass
+            if re.search(LINK_PATTERN, text_raw.lower()):
+                try:
+                    await event.delete()
+                    return await event.respond("mention sharing groups or channels is prohibited.")
                 except: pass
 
-            if cmd == "auth" and target_id:
-                if target_id not in AUTHORIZED_USERS:
-                    AUTHORIZED_USERS.append(target_id)
-                    try:
-                        u = await client.get_entity(target_id)
-                        name = f"[{u.first_name.lower()}](tg://user?id={u.id})"
-                    except: name = f"`{target_id}`"
-                    response_text = f"{name} authorized."
+        if "fwon" in modes and event.fwd_from:
+            try: return await event.delete()
+            except: pass
+
+    # YETKİLİ KOMUTLARI
+    if is_auth and is_command:
+        parts = text_raw.split()
+        cmd = parts[0][1:].lower()
+        args = parts[1:]
+        res = None
+
+        def get_duration():
+            try: return int(args[0]) if args else None
+            except: return None
+
+        # Mod Komutları
+        m_list = {"ton":"ton", "toff":"ton", "xon":"xon", "xoff":"xon", "won":"won", "woff":"won", "con":"con", "coff":"con", "fwon":"fwon", "fwoff":"fwon"}
+        
+        if cmd in m_list:
+            mode_key = m_list[cmd]
+            if chat_id not in group_modes: group_modes[chat_id] = {}
+            if cmd.endswith("off"):
+                group_modes[chat_id].pop(mode_key, None)
+                res = "offline"
+            else:
+                group_modes[chat_id][mode_key] = True
+                res = "online"
+                dur = get_duration()
+                if dur:
+                    res = f"online ({dur} min)"
+                    # Timer logic buraya eklenebilir (önceki kodda olduğu gibi)
+
+        # Kişisel Ban Komutları
+        elif cmd in ["tban", "tunban", "mban", "munban"]:
+            target = None
+            if event.is_reply:
+                rep = await event.get_reply_message()
+                target = rep.sender_id
             
-            elif cmd == "deauth" and target_id:
-                if target_id != SUPER_ADMIN and target_id in AUTHORIZED_USERS:
-                    AUTHORIZED_USERS.remove(target_id)
-                    try:
-                        u = await client.get_entity(target_id)
-                        name = f"[{u.first_name.lower()}](tg://user?id={u.id})"
-                    except: name = f"`{target_id}`"
-                    response_text = f"{name} authority has been taken."
+            if target:
+                if cmd == "tban":
+                    if chat_id not in user_bans: user_bans[chat_id] = []
+                    user_bans[chat_id].append(target)
+                    res = "user text banned."
+                elif cmd == "tunban":
+                    if target in user_bans.get(chat_id, []): user_bans[chat_id].remove(target)
+                    res = "user text ban lifted."
+                elif cmd == "mban":
+                    if chat_id not in media_bans: media_bans[chat_id] = []
+                    media_bans[chat_id].append(target)
+                    res = "user media banned."
+                elif cmd == "munban":
+                    if target in media_bans.get(chat_id, []): media_bans[chat_id].remove(target)
+                    res = "user media ban lifted."
 
-            elif cmd == "authlist":
-                is_list_cmd = True
-                auth_list_text = "authorized users list:\n\n"
-                for uid in AUTHORIZED_USERS:
-                    try:
-                        u = await client.get_entity(uid)
-                        auth_list_text += f"user: {u.first_name.lower()} | id: `{u.id}`\n"
-                    except: 
-                        auth_list_text += f"user: authorized | id: `{uid}`\n"
-                response_text = auth_list_text
-
-        # Komut İşlemleri
-        if cmd == "xon":
-            group_modes[chat_id] = "aktifmedya"
-            response_text = "online"
-        elif cmd == "xoff":
-            group_modes.pop(chat_id, None)
-            response_text = "offline"
-        elif cmd == "won":
-            group_modes[chat_id] = "aktifchat"
-            response_text = "online"
-        elif cmd == "woff":
-            group_modes.pop(chat_id, None)
-            response_text = "offline"
-        elif cmd == "forwardon":
-            forward_protection[chat_id] = True
-            response_text = "online"
-        elif cmd == "forwardoff":
-            forward_protection[chat_id] = False
-            response_text = "offline"
-        elif cmd == "con": # Yeni Kanal Engelleme Aç
-            channel_block[chat_id] = True
-            response_text = "online"
-        elif cmd == "coff": # Yeni Kanal Engelleme Kapat
-            channel_block[chat_id] = False
-            response_text = "offline"
-
-        if response_text:
-            rep = await event.respond(response_text)
+        if res:
+            sent = await event.respond(res)
             asyncio.create_task(self_destruct(event))
-            if not is_list_cmd:
-                asyncio.create_task(self_destruct(rep))
+            asyncio.create_task(self_destruct(sent))
 
 async def start_bot():
     await client.start()
