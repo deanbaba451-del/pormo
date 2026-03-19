@@ -1,58 +1,59 @@
+import os
 import asyncio
+from pyrogram import Client, filters
 from flask import Flask
 from threading import Thread
-from telethon import TelegramClient, events
-from telethon.sessions import StringSession
 
-# --- AYARLAR ---
-API_ID = 20275001
-API_HASH = "26e474f4a17fe5b306cc6ecfd2a1ed55"
-SESSION = "1BJWap1wBu6BWmzbKhuKET-vgh7kHrYnmrAFbQzQHw6DZaHu_61YMZCiB_DJakE5TVHGuxEasypULtDEMBan-VnxS105s04bMvdgVjYz6XW65Jk2njBCe1xdZbVb3Mikrkcao4MgyGuWtNEvJPQoLl9X3m7jw4EtJoNQ16_ovggEhvgPqZyWbEym2gJ9U7m3zJgu5CmviSLAUKPIHvb2Dreu1QFrK1__SBZiNXGz-RU3tGcgxLSLre_EyFq7Px-4BNVY9qgwrJnpdet7_OqzGXLW4EHBow5IkhAZgxGltFOHsvSDKYNfT_LYJXlA06emAxNwGGz9q72GJ3XEQWZLOmi62KdASAbI="
-ADMIN = 6534222591
-
-app = Flask('')
-nuke = False
-client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "online"
+    return "Bot aktif"
 
-@client.on(events.NewMessage(pattern=r'\.b'))
-async def b_handler(e):
-    global nuke
-    if e.out or e.sender_id == ADMIN:
-        nuke = True
-        await e.edit("online")
+def run():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
-@client.on(events.NewMessage(pattern=r'\.i'))
-async def i_handler(e):
-    global nuke
-    if e.out or e.sender_id == ADMIN:
-        nuke = False
-        await e.edit("offline")
+api_id = 20275001
+api_hash = "26e474f4a17fe5b306cc6ecfd2a1ed55"
+string_session = "1BJWap1wBu6BWmzbKhuKET-vgh7kHrYnmrAFbQzQHw6DZaHu_61YMZCiB_DJakE5TVHGuxEasypULtDEMBan-VnxS105s04bMvdgVjYz6XW65Jk2njBCe1xdZbVb3Mikrkcao4MgyGuWtNEvJPQoLl9X3m7jw4EtJoNQ16_ovggEhvgPqZyWbEym2gJ9U7m3zJgu5CmviSLAUKPIHvb2Dreu1QFrK1__SBZiNXGz-RU3tGcgxLSLre_EyFq7Px-4BNVY9qgwrJnpdet7_OqzGXLW4EHBow5IkhAZgxGltFOHsvSDKYNfT_LYJXlA06emAxNwGGz9q72GJ3XEQWZLOmi62KdASAbI="
+owners = [6534222591]
 
-@client.on(events.NewMessage)
-async def temizle(e):
-    global nuke
-    if nuke and e.sender_id != ADMIN and not e.out:
+user_bot = Client(
+    "my_account", 
+    api_id=api_id, 
+    api_hash=api_hash, 
+    session_string=string_session
+)
+
+active_chats = set()
+
+@user_bot.on_message(filters.user(owners) & filters.command("b", prefixes="."))
+async def start_nuke(client, message):
+    active_chats.add(message.chat.id)
+    await message.edit_text("online")
+
+@user_bot.on_message(filters.user(owners) & filters.command("i", prefixes="."))
+async def stop_nuke(client, message):
+    if message.chat.id in active_chats:
+        active_chats.remove(message.chat.id)
+    await message.edit_text("offline")
+
+@user_bot.on_message(filters.group, group=1)
+async def cleaner(client, message):
+    if message.chat.id in active_chats:
+        if message.from_user and message.from_user.id in owners:
+            return
         try:
-            await e.delete()
+            await message.delete()
         except:
             pass
 
-def flask_thread():
-    app.run(host='0.0.0.0', port=8080)
+def keep_alive():
+    t = Thread(target=run)
+    t.daemon = True
+    t.start()
 
-async def start_everything():
-    # Flask'ı arka planda başlat
-    Thread(target=flask_thread, daemon=True).start()
-    
-    # Botu başlat
-    await client.start()
-    print("Bot aktif.")
-    await client.run_until_disconnected()
-
-if __name__ == '__main__':
-    # Yeni nesil asyncio çalıştırma yöntemi
-    asyncio.run(start_everything())
+if __name__ == "__main__":
+    keep_alive()
+    user_bot.run()
