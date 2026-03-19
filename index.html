@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>efe 💗 damla barışsın</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+<style>
+body {
+    text-align: center;
+    font-family: arial;
+    background: #ffe6f0;
+}
+h1 {
+    margin-top: 50px;
+}
+button {
+    padding: 15px 30px;
+    font-size: 20px;
+    border: none;
+    background: pink;
+    color: black;
+    border-radius: 10px;
+    cursor: pointer;
+}
+footer {
+    margin-top: 40px;
+    font-size: 14px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>efe 💗 damla barışsın</h1>
+<h2 id="sayi">0</h2>
+
+<input type="text" id="isim" placeholder="ismini yaz"><br><br>
+<button onclick="arttir()">barışsınlar 💗</button>
+
+<footer>insecure tarafından yapılmıştır 💗</footer>
+
+<script>
+const firebaseconfig = {
+  apikey: "AIzaSyAIwvfw2qy7niuGLgfx4vfeQ9w6wA-Tfu0",
+  authdomain: "efevefamla.firebaseapp.com",
+  databaseurl: "https://efevefamla-default-rtdb.firebaseio.com/",
+  projectid: "efevefamla",
+  storagebucket: "efevefamla.firebasestorage.app",
+  messagingsenderid: "1019650737574",
+  appid: "1:1019650737574:web:3d4106677a3b3d90d1bb67"
+};
+
+firebase.initializeapp(firebaseconfig);
+const db = firebase.database();
+
+db.ref("sayac").on("value", (snap) => {
+    document.getElementById("sayi").innertext = snap.val() || 0;
+});
+
+function arttir() {
+    let isim = document.getElementById("isim").value;
+
+    if(isim.trim() === "") {
+        alert("isim yaz!");
+        return;
+    }
+
+    let ref = db.ref("sayac");
+
+    ref.transaction((current) => {
+        return (current || 0) + 1;
+    });
+
+    console.log(isim + " bastı 💗");
+}
+</script>
+
+</body>
+</html>
