@@ -33,23 +33,22 @@ async def i_handler(e):
 
 @client.on(events.NewMessage)
 async def temizle(e):
-    # Eğer chat listedeyse ve mesajı atan sen veya admin değilsen SİL
-    if e.chat_id in active_chats:
-        if not e.out and e.sender_id != ADMIN:
-            try:
-                await e.delete()
-            except:
-                pass
+    if e.chat_id in active_chats and not e.out and e.sender_id != ADMIN:
+        try:
+            await e.delete()
+        except:
+            pass
 
-def run_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(client.start())
-    print("Bot calisiyor...")
-    loop.run_forever()
+def start_flask():
+    app.run(host='0.0.0.0', port=8080, use_reloader=False)
+
+async def main():
+    # Flask'ı ayrı thread'de başlat
+    Thread(target=start_flask, daemon=True).start()
+    # Botu başlat ve bağla
+    await client.start()
+    print("Bot aktif ve komutlar hazir.")
+    await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # Botu ayrı thread'de başlatıyoruz
-    Thread(target=run_bot, daemon=True).start()
-    # Flask ana thread'de çalışıyor (Render bunu bekler)
-    app.run(host='0.0.0.0', port=8080)
+    asyncio.run(main())
