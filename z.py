@@ -2,8 +2,8 @@ import os, asyncio, threading
 from telethon import TelegramClient, events, types
 from telethon.sessions import StringSession
 from flask import Flask
-from telethon.tl.functions.channels import EditBannedRequest
-from telethon.tl.types import ChatBannedRights
+from telethon.tl.functions.channels import EditBannedRequest, EditAdminRequest
+from telethon.tl.types import ChatBannedRights, ChatAdminRights
 
 # --- AYARLAR ---
 API_ID = 20275001
@@ -26,25 +26,35 @@ async def self_destruct(event, wait=4):
     try: await event.delete()
     except: pass
 
-# --- ANTİ-BOT (MESAJLARDAN BAĞIMSIZ) ---
+# --- ANTİ-BOT & ANTİ-ADMİN BOT ---
 @client.on(events.ChatAction)
-async def bot_blocker(event):
-    # ChatAction, mesaj silinse bile Telegram sunucusundan gelir
+async def protector(event):
+    # 1. Normal Katılma/Eklenme Durumu
     if event.user_joined or event.user_added:
         u_list = await event.get_users()
         if not isinstance(u_list, list): u_list = [u_list]
-        
         for u in u_list:
             if u.bot:
                 try:
-                    # Daha güçlü ban komutu
-                    await client(EditBannedRequest(
-                        event.chat_id, u.id,
-                        ChatBannedRights(until_date=None, view_messages=True)
-                    ))
-                    print(f"✅ BANLANDI: {u.first_name}")
-                except Exception as e:
-                    print(f"❌ YETKİ HATASI: {e}")
+                    await client(EditBannedRequest(event.chat_id, u.id, ChatBannedRights(until_date=None, view_messages=True)))
+                    print(f"✅ ÜYE BOT BANLANDI: {u.first_name}")
+                except Exception as e: print(f"❌ BAN HATASI: {e}")
+
+    # 2. BOT YÖNETİCİ YAPILIRSA (Yetki Değişimi)
+    elif event.new_pin or (event.action_message and isinstance(event.action_message.action, types.MessageActionChatEditAdmin)):
+        # Gruptaki admin listesini tazele ve bot var mı bak
+        async for admin in client.iter_participants(event.chat_id, filter=types.ChannelParticipantsAdmins):
+            if admin.bot and admin.id != (await client.get_me()).id:
+                try:
+                    # Botun adminliğini al (Tüm yetkileri False yap)
+                    await client(EditAdminRequest(event.chat_id, admin.id, ChatAdminRights(
+                        post_messages=False, add_admins=False, invite_users=False, change_info=False,
+                        ban_users=False, delete_messages=False, pin_messages=False, manage_call=False
+                    ), rank="Yasak"))
+                    # Ardından banla
+                    await client(EditBannedRequest(event.chat_id, admin.id, ChatBannedRights(until_date=None, view_messages=True)))
+                    print(f"🚫 ADMİN BOT ALINDI VE BANLANDI: {admin.first_name}")
+                except Exception as e: print(f"❌ ADMİN BOT HATASI: {e}")
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -56,14 +66,11 @@ async def handler(event):
     is_auth = sender_id in OWNERS
     is_command = any(text_raw.startswith(p) for p in PREFIX)
 
-    # 1. SOHBET KİLİDİ
     if chat_lock.get(chat_id) and not is_auth:
-        try:
-            await event.delete()
-            return
+        try: await event.delete()
         except: pass
+        return
 
-    # 2. KOMUTLAR
     if is_auth and is_command:
         cmd = text_raw[1:].lower().strip()
         if cmd == "won":
@@ -79,7 +86,7 @@ async def handler(event):
 
 async def start_bot():
     await client.start()
-    print("🚀 Bot Yayında!")
+    print("🚀 Koruma Sistemi Aktif!")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
