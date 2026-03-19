@@ -2,6 +2,8 @@ import os, asyncio, threading
 from telethon import TelegramClient, events, types
 from telethon.sessions import StringSession
 from flask import Flask
+from telethon.tl.functions.channels import EditBannedRequest
+from telethon.tl.types import ChatBannedRights
 
 # --- AYARLAR ---
 API_ID = 20275001
@@ -24,28 +26,25 @@ async def self_destruct(event, wait=4):
     try: await event.delete()
     except: pass
 
-# --- ANTİ-BOT (EYLEM ODAKLI) ---
+# --- ANTİ-BOT (MESAJLARDAN BAĞIMSIZ) ---
 @client.on(events.ChatAction)
 async def bot_blocker(event):
-    # Bir kullanıcı katıldıysa veya eklendiyse (Servis mesajı silinse bile bu tetiklenir)
+    # ChatAction, mesaj silinse bile Telegram sunucusundan gelir
     if event.user_joined or event.user_added:
-        # Eklenen tüm kullanıcıları kontrol et
-        target_users = await event.get_users()
-        if not isinstance(target_users, list):
-            target_users = [target_users]
-            
-        for user in target_users:
-            if user.bot:
+        u_list = await event.get_users()
+        if not isinstance(u_list, list): u_list = [u_list]
+        
+        for u in u_list:
+            if u.bot:
                 try:
-                    # Botu gruptan banla
-                    await client.edit_permissions(
-                        event.chat_id, 
-                        user.id, 
-                        view_messages=False
-                    )
-                    print(f"BAŞARILI: {user.first_name} (@{user.username}) banlandı.")
+                    # Daha güçlü ban komutu
+                    await client(EditBannedRequest(
+                        event.chat_id, u.id,
+                        ChatBannedRights(until_date=None, view_messages=True)
+                    ))
+                    print(f"✅ BANLANDI: {u.first_name}")
                 except Exception as e:
-                    print(f"HATA: Bot banlanamadı, yetkiyi kontrol et: {e}")
+                    print(f"❌ YETKİ HATASI: {e}")
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -80,7 +79,7 @@ async def handler(event):
 
 async def start_bot():
     await client.start()
-    print("Userbot Aktif!")
+    print("🚀 Bot Yayında!")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
