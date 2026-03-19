@@ -28,7 +28,6 @@ nuke_active = False
 @client.on(events.NewMessage)
 async def handler(event):
     global nuke_active
-    sender = await event.get_sender()
     sender_id = event.sender_id
 
     if sender_id in owners:
@@ -49,8 +48,9 @@ async def handler(event):
 
 async def main():
     keep_alive()
-    print("bot baslatildi")
     await client.start()
+    print("bot acildi")
     await client.run_until_disconnected()
 
-client.loop.run_until_complete(main())
+if __name__ == '__main__':
+    asyncio.run(main())
