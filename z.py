@@ -1,39 +1,46 @@
 import asyncio
+import os
+from flask import Flask
+from threading import Thread
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# --- AYARLAR ---
+# --- FLASK SUNUCUSU (7/24 İçin) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot Aktif!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# --- TELEGRAM AYARLARI ---
 api_id = 20275001
 api_hash = "26e474f4a17fe5b306cc6ecfd2a1ed55"
-string_session = "1BJWap1w... (Buraya session stringini koy)" # Güvenliğin için bunu gizli tut!
-owners = [6534222591] 
+string_session = "1BJWap1wBu6BWmzbKhuKET-vgh7kHrYnmrAFbQzQHw6DZaHu_61YMZCiB_DJakE5TVHGuxEasypULtDEMBan-VnxS105s04bMvdgVjYz6XW65Jk2njBCe1xdZbVb3Mikrkcao4MgyGuWtNEvJPQoLl9X3m7jw4EtJoNQ16_ovggEhvgPqZyWbEym2gJ9U7m3zJgu5CmviSLAUKPIHvb2Dreu1QFrK1__SBZiNXGz-RU3tGcgxLSLre_EyFq7Px-4BNVY9qgwrJnpdet7_OqzGXLW4EHBow5IkhAZgxGltFOHsvSDKYNfT_LYJXlA06emAxNwGGz9q72GJ3XEQWZLOmi62KdASAbI="
+owners = [6534222591]
 
-# Client başlatma
 client = TelegramClient(StringSession(string_session), api_id, api_hash)
 
 @client.on(events.NewMessage)
-async def handler(event):
-    # Sadece sahiplerden gelen mesajları kontrol etme veya muaf tutma mantığı
+async def nuke(event):
     if event.sender_id in owners:
         return
-
     try:
-        # Mesajı silme işlemi
         await event.delete()
     except Exception as e:
-        print(f"Hata oluştu: {e}")
+        print(f"Hata: {e}")
 
-async def main():
-    # Botu başlat
+async def start_bot():
     await client.start()
-    print("Bot aktif ve çalışıyor...")
-    
-    # Render gibi platformlarda bağlantının kopmaması için süresiz bekleme
+    print("Telegram Botu Başlatıldı...")
     await client.run_until_disconnected()
 
-if __name__ == '__main__':
-    try:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        pass
+if __name__ == "__main__":
+    keep_alive() # Web sunucusunu başlat
+    asyncio.get_event_loop().run_until_complete(start_bot())
