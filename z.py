@@ -1,16 +1,3 @@
-import asyncio
-from pyrogram import Client, filters
-from flask import Flask
-from threading import Thread
-
-app = Flask("")
-
-@app.route('/')
-def home():
-    return "Bot aktif"
-
-def run():
-    app.run(host="0.0.0.0", port=8080)
 
 api_id = 20275001
 api_hash = "26e474f4a17fe5b306cc6ecfd2a1ed55"
@@ -48,4 +35,5 @@ def keep_alive():
 
 if __name__ == "__main__":
     keep_alive()
+    user_bot.run()    keep_alive()
     user_bot.run()
