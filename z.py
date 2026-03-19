@@ -24,20 +24,28 @@ async def self_destruct(event, wait=4):
     try: await event.delete()
     except: pass
 
-# --- ANTİ-BOT ÖZELLİĞİ ---
+# --- ANTİ-BOT (EYLEM ODAKLI) ---
 @client.on(events.ChatAction)
 async def bot_blocker(event):
-    # Eğer yeni bir kullanıcı katıldıysa veya eklendiyse
+    # Bir kullanıcı katıldıysa veya eklendiyse (Servis mesajı silinse bile bu tetiklenir)
     if event.user_joined or event.user_added:
-        users = await event.get_users()
-        for user in users:
-            # Eğer eklenen kullanıcı bir BOT ise
+        # Eklenen tüm kullanıcıları kontrol et
+        target_users = await event.get_users()
+        if not isinstance(target_users, list):
+            target_users = [target_users]
+            
+        for user in target_users:
             if user.bot:
                 try:
-                    # Botu gruptan banla (Kick de yapılabilir ama ban kesin çözümdür)
-                    await client.edit_permissions(event.chat_id, user.id, view_messages=False)
+                    # Botu gruptan banla
+                    await client.edit_permissions(
+                        event.chat_id, 
+                        user.id, 
+                        view_messages=False
+                    )
+                    print(f"BAŞARILI: {user.first_name} (@{user.username}) banlandı.")
                 except Exception as e:
-                    print(f"Bot banlanamadı: {e}")
+                    print(f"HATA: Bot banlanamadı, yetkiyi kontrol et: {e}")
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -59,13 +67,11 @@ async def handler(event):
     # 2. KOMUTLAR
     if is_auth and is_command:
         cmd = text_raw[1:].lower().strip()
-
         if cmd == "won":
             chat_lock[chat_id] = True
             sent = await event.respond("on.")
             asyncio.create_task(self_destruct(event))
             asyncio.create_task(self_destruct(sent))
-            
         elif cmd == "woff":
             chat_lock[chat_id] = False
             sent = await event.respond("off.")
@@ -74,6 +80,7 @@ async def handler(event):
 
 async def start_bot():
     await client.start()
+    print("Userbot Aktif!")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
