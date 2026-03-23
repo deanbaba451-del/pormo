@@ -1,96 +1,130 @@
+import asyncio
 import os
 import threading
-import asyncio
 from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from aiogram import Bot, Dispatcher, types, executor
+from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError, FloodWaitError
+from telethon.tl.functions.channels import InviteToChannelRequest
 
-# --- FLASK (Render İçin) ---
+# --- FLASK AYARLARI (Render Port Hatasını Çözmek İçin) ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Aktif!"
+    return "Bot is running!"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
+    # Render PORT değişkenini otomatik atar, yoksa 10000 kullanır
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 # --- BOT AYARLARI ---
-TOKEN = "8581042868:AAHhHlRDeiP6Pj_Q0_Zqa6FyrQx8xM0l6qU"
-KANAL_KULLANICI_ADI = "@israilkrallik"
-HEDEF_REF = 5
-ADMIN_IDLER = [8256872080, 6534222591]
+BOT_TOKEN = "8730162607:AAF65-aKIv1sd7AmrLSVechf3Z0fT2dMExo"
+OWNER_ID = 8256872080
 
-user_data = {}
-all_users = set()
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    uid = user.id
-    all_users.add(uid)
+allowed_users = {OWNER_ID}
+sessions = {}
+running = {}
+login_data = {}
 
-    if uid not in user_data:
-        user_data[uid] = 0
-        for admin in ADMIN_IDLER:
-            try: await context.bot.send_message(admin, f"👤 Yeni: {user.first_name}\n🆔 ID: `{uid}`")
-            except: pass
-        if context.args:
-            try:
-                ref_id = int(context.args[0])
-                if ref_id != uid: user_data[ref_id] = user_data.get(ref_id, 0) + 1
-            except: pass
+GROUP = "grup_username"
+users = ["kullanici1", "kullanici2"]
 
+def is_allowed(uid):
+    return uid in allowed_users
+
+# --- BOT KOMUTLARI ---
+
+@dp.message_handler(commands=["start"])
+async def start(msg: types.Message):
+    if not is_allowed(msg.from_user.id): return
+    await msg.reply("📱 Telefon numaranı gönder (+905xx...)")
+
+@dp.message_handler(commands=["yetki"])
+async def yetki(msg: types.Message):
+    if msg.from_user.id != OWNER_ID: return
     try:
-        m = await context.bot.get_chat_member(KANAL_KULLANICI_ADI, uid)
-        if m.status.value in ['left', 'kicked']:
-            kb = [[InlineKeyboardButton("Kanala Katıl", url=f"https://t.me/{KANAL_KULLANICI_ADI[1:]}")],
-                  [InlineKeyboardButton("Katıldım ✅", callback_data="check")]]
-            await (update.callback_query.message.reply_text if update.callback_query else update.message.reply_text)(
-                "⚠️ Kanala katılmalısın!", reply_markup=InlineKeyboardMarkup(kb))
-            return
-    except: pass
+        _, act, uid = msg.text.split()
+        uid = int(uid)
+        if act == "ekle": allowed_users.add(uid)
+        elif act == "sil": allowed_users.discard(uid)
+        await msg.reply(f"✅ İşlem tamam: {uid}")
+    except:
+        await msg.reply("/yetki ekle 12345")
 
-    refs = user_data.get(uid, 0)
-    bot_info = await context.bot.get_me()
-    link = f"https://t.me/{bot_info.username}?start={uid}"
+@dp.message_handler(lambda m: m.text.startswith("+"))
+async def phone(msg: types.Message):
+    if not is_allowed(msg.from_user.id): return
+    login_data[msg.from_user.id] = {"phone": msg.text}
+    await msg.reply("API ID gönder")
 
-    if refs < HEDEF_REF:
-        txt = f"🆔 ID: `{uid}`\n👤 Mention: {user.mention_markdown_v2()}\n📊 Ref: {refs}/{HEDEF_REF}\n🔗 Link: {link}\n\n🚀 5 kişiye gönder!"
-        photos = await user.get_profile_photos()
-        if update.callback_query:
-            if photos.total_count > 0: await update.callback_query.message.reply_photo(photos.photos[0][-1].file_id, caption=txt, parse_mode="MarkdownV2")
-            else: await update.callback_query.message.reply_text(txt, parse_mode="MarkdownV2")
-        else:
-            if photos.total_count > 0: await update.message.reply_photo(photos.photos[0][-1].file_id, caption=txt, parse_mode="MarkdownV2")
-            else: await update.message.reply_text(txt, parse_mode="MarkdownV2")
-    else:
-        await (update.callback_query.message.reply_text if update.callback_query else update.message.reply_text)("🎉 Bot aktif!")
+@dp.message_handler(lambda m: m.text.isdigit() and len(m.text) < 10)
+async def api_id(msg: types.Message):
+    if not is_allowed(msg.from_user.id): return
+    login_data[msg.from_user.id]["api_id"] = int(msg.text)
+    await msg.reply("API HASH gönder")
 
-async def bullet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDLER or not context.args: return
-    text = " ".join(context.args)
-    count = 0
-    for u in list(all_users):
+@dp.message_handler(lambda m: len(m.text) > 20)
+async def api_hash(msg: types.Message):
+    uid = msg.from_user.id
+    if not is_allowed(uid): return
+    data = login_data[uid]
+    data["api_hash"] = msg.text
+    
+    client = TelegramClient(f"session_{uid}", data["api_id"], data["api_hash"])
+    await client.connect()
+    sent_code = await client.send_code_request(data["phone"])
+    data["hash"] = sent_code.phone_code_hash
+    sessions[uid] = client
+    await msg.reply("📩 Kod gönderildi, buraya yaz:")
+
+@dp.message_handler(lambda m: m.text.isdigit() and len(m.text) == 5)
+async def code(msg: types.Message):
+    uid = msg.from_user.id
+    client = sessions[uid]
+    data = login_data[uid]
+    try:
+        await client.sign_in(data["phone"], msg.text, phone_code_hash=data["hash"])
+        await msg.reply("✅ Giriş OK!\n/basla")
+    except SessionPasswordNeededError:
+        await msg.reply("🔒 2FA Şifreni gir")
+
+@dp.message_handler(commands=["basla"])
+async def basla(msg: types.Message):
+    uid = msg.from_user.id
+    if not is_allowed(uid) or uid not in sessions: return
+    
+    client = sessions[uid]
+    running[uid] = True
+    entity = await client.get_entity(GROUP)
+    await msg.reply("🚀 Başlatıldı")
+
+    while running.get(uid):
         try:
-            await context.bot.send_message(u, f"📢 **DUYURU**\n\n{text}")
-            count += 1
-        except: pass
-    await update.message.reply_text(f"✅ {count} kişiye gönderildi.")
+            # Invite işlemi (Sınırları aşmamak için süreye dikkat)
+            await client(InviteToChannelRequest(entity, users[:3]))
+            await asyncio.sleep(60) 
+        except FloodWaitError as e:
+            await asyncio.sleep(e.seconds)
+        except Exception:
+            break
 
-async def cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await start(update, context)
+@dp.message_handler(commands=["dur"])
+async def dur(msg: types.Message):
+    running[msg.from_user.id] = False
+    await msg.reply("⛔ Durduruldu")
 
-if __name__ == '__main__':
-    # Flask başlat
-    threading.Thread(target=run_flask, daemon=True).start()
-    
-    # Botu yeni sisteme göre başlat
-    app_bot = Application.builder().token(TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("bullet", bullet))
-    app_bot.add_handler(CallbackQueryHandler(cb))
-    
-    print("Bot 21.10 sürümü ile Python 3.14 üzerinde çalışıyor...")
-    app_bot.run_polling()
+# --- ANA ÇALIŞTIRICI ---
+
+if __name__ == "__main__":
+    # 1. Flask'ı ayrı bir thread'de başlat (Portu dinlemesi için)
+    t = threading.Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+
+    # 2. Aiogram Botu başlat
+    executor.start_polling(dp, skip_updates=True)
