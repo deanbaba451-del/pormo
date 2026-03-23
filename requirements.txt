@@ -2,4 +2,3 @@ aiogram==2.25.1
 telethon
 flask
 gunicorn
-aiohttp>=3.9.0
