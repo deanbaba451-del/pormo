@@ -1,130 +1,153 @@
-import asyncio
 import os
-import threading
+import asyncio
 from flask import Flask
-from aiogram import Bot, Dispatcher, types, executor
-from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError, FloodWaitError
-from telethon.tl.functions.channels import InviteToChannelRequest
+from telethon import TelegramClient, events, functions, types, utils
+from telethon.sessions import StringSession, MemorySession
+from telethon.errors import UserPrivacyRestrictedError, FloodWaitError, PeerFloodError
 
-# --- FLASK AYARLARI (Render Port Hatasını Çözmek İçin) ---
+# --- yapılandırma ---
+API_ID = 38517910
+API_HASH = "974a2b5877fab4867b1b48276d9e1c39"
+BOT_TOKEN = "8503702390:AAH2ZVUKn0v4v3EbnSYSM0KaVZM_FxNf5ec"
+
 app = Flask(__name__)
 
 @app.route('/')
-def home():
-    return "Bot is running!"
+def home(): return "bot aktif"
 
-def run_flask():
-    # Render PORT değişkenini otomatik atar, yoksa 10000 kullanır
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+bot = TelegramClient(MemorySession(), API_ID, API_HASH)
+user_states = {}
 
-# --- BOT AYARLARI ---
-BOT_TOKEN = "8730162607:AAF65-aKIv1sd7AmrLSVechf3Z0fT2dMExo"
-OWNER_ID = 8256872080
+async def start_bot():
+    await bot.start(bot_token=BOT_TOKEN)
+    print("--- bot hazir ---")
 
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+@bot.on(events.NewMessage)
+async def handler(event):
+    msg = event.text.lower() if event.text else ""
+    user_id = event.sender_id
+    state = user_states.get(user_id)
 
-allowed_users = {OWNER_ID}
-sessions = {}
-running = {}
-login_data = {}
+    if msg == "/start" or msg == "start":
+        await event.reply("selam, aktarim baslatmak icin numaranı yaz (orn: +905xxx):")
+        user_states[user_id] = {'step': 'phone'}
+        return
 
-GROUP = "grup_username"
-users = ["kullanici1", "kullanici2"]
-
-def is_allowed(uid):
-    return uid in allowed_users
-
-# --- BOT KOMUTLARI ---
-
-@dp.message_handler(commands=["start"])
-async def start(msg: types.Message):
-    if not is_allowed(msg.from_user.id): return
-    await msg.reply("📱 Telefon numaranı gönder (+905xx...)")
-
-@dp.message_handler(commands=["yetki"])
-async def yetki(msg: types.Message):
-    if msg.from_user.id != OWNER_ID: return
-    try:
-        _, act, uid = msg.text.split()
-        uid = int(uid)
-        if act == "ekle": allowed_users.add(uid)
-        elif act == "sil": allowed_users.discard(uid)
-        await msg.reply(f"✅ İşlem tamam: {uid}")
-    except:
-        await msg.reply("/yetki ekle 12345")
-
-@dp.message_handler(lambda m: m.text.startswith("+"))
-async def phone(msg: types.Message):
-    if not is_allowed(msg.from_user.id): return
-    login_data[msg.from_user.id] = {"phone": msg.text}
-    await msg.reply("API ID gönder")
-
-@dp.message_handler(lambda m: m.text.isdigit() and len(m.text) < 10)
-async def api_id(msg: types.Message):
-    if not is_allowed(msg.from_user.id): return
-    login_data[msg.from_user.id]["api_id"] = int(msg.text)
-    await msg.reply("API HASH gönder")
-
-@dp.message_handler(lambda m: len(m.text) > 20)
-async def api_hash(msg: types.Message):
-    uid = msg.from_user.id
-    if not is_allowed(uid): return
-    data = login_data[uid]
-    data["api_hash"] = msg.text
-    
-    client = TelegramClient(f"session_{uid}", data["api_id"], data["api_hash"])
-    await client.connect()
-    sent_code = await client.send_code_request(data["phone"])
-    data["hash"] = sent_code.phone_code_hash
-    sessions[uid] = client
-    await msg.reply("📩 Kod gönderildi, buraya yaz:")
-
-@dp.message_handler(lambda m: m.text.isdigit() and len(m.text) == 5)
-async def code(msg: types.Message):
-    uid = msg.from_user.id
-    client = sessions[uid]
-    data = login_data[uid]
-    try:
-        await client.sign_in(data["phone"], msg.text, phone_code_hash=data["hash"])
-        await msg.reply("✅ Giriş OK!\n/basla")
-    except SessionPasswordNeededError:
-        await msg.reply("🔒 2FA Şifreni gir")
-
-@dp.message_handler(commands=["basla"])
-async def basla(msg: types.Message):
-    uid = msg.from_user.id
-    if not is_allowed(uid) or uid not in sessions: return
-    
-    client = sessions[uid]
-    running[uid] = True
-    entity = await client.get_entity(GROUP)
-    await msg.reply("🚀 Başlatıldı")
-
-    while running.get(uid):
+    # 1. ADIM: NUMARA
+    if state and state['step'] == 'phone':
+        client = TelegramClient(MemorySession(), API_ID, API_HASH)
+        await client.connect()
         try:
-            # Invite işlemi (Sınırları aşmamak için süreye dikkat)
-            await client(InviteToChannelRequest(entity, users[:3]))
-            await asyncio.sleep(60) 
-        except FloodWaitError as e:
-            await asyncio.sleep(e.seconds)
-        except Exception:
-            break
+            send_code = await client.send_code_request(event.text)
+            user_states[user_id] = {'step': 'code', 'client': client, 'phone': event.text, 'hash': send_code.phone_code_hash}
+            await event.reply("kodu yaz:")
+        except Exception as e:
+            await event.reply(f"hata: {str(e).lower()}")
+        return
 
-@dp.message_handler(commands=["dur"])
-async def dur(msg: types.Message):
-    running[msg.from_user.id] = False
-    await msg.reply("⛔ Durduruldu")
+    # 2. ADIM: KOD VE LISTE
+    if state and state['step'] == 'code':
+        try:
+            client = state['client']
+            await client.sign_in(state['phone'], event.text, phone_code_hash=state['hash'])
+            dialogs = []
+            text = "giris yapildi. kaynak grubu sec:\n\n"
+            i = 1
+            async for d in client.iter_dialogs():
+                if d.is_group or d.is_channel:
+                    dialogs.append(d)
+                    text += f"{i}. {d.name}\n"
+                    i += 1
+            user_states[user_id].update({'step': 'source', 'dialogs': dialogs})
+            await event.reply(text)
+        except Exception as e:
+            await event.reply(f"hata: {str(e).lower()}")
+        return
 
-# --- ANA ÇALIŞTIRICI ---
+    # 3. ADIM: KAYNAK SECIMI
+    if state and state['step'] == 'source':
+        try:
+            idx = int(event.text) - 1
+            source = state['dialogs'][idx]
+            user_states[user_id].update({'step': 'target', 'source_id': source.id})
+            await event.reply(f"kaynak: {source.name}\nsimdi hedef grubu sec:")
+        except:
+            await event.reply("listeden numara sec.")
+        return
 
-if __name__ == "__main__":
-    # 1. Flask'ı ayrı bir thread'de başlat (Portu dinlemesi için)
-    t = threading.Thread(target=run_flask)
-    t.daemon = True
-    t.start()
+    # 4. ADIM: HEDEF SECIMI VE SAYI ISTEME
+    if state and state['step'] == 'target':
+        try:
+            idx = int(event.text) - 1
+            target = state['dialogs'][idx]
+            user_states[user_id].update({'step': 'limit', 'target_id': target.id})
+            await event.reply(f"hedef: {target.name}\nkac uye eklensin? (sayi yazin):")
+        except:
+            await event.reply("listeden numara sec.")
+        return
 
-    # 2. Aiogram Botu başlat
-    executor.start_polling(dp, skip_updates=True)
+    # 5. ADIM: SAYI ALMA VE FILTRELI AKTARIM
+    if state and state['step'] == 'limit':
+        try:
+            limit_val = int(event.text)
+            source_id = state['source_id']
+            target_id = state['target_id']
+            client = state['client']
+            
+            await event.reply(f"kontrol yapiliyor ve {limit_val} kisi icin islem basliyor...")
+            
+            # Hedef gruptaki mevcut uyeleri cek (mukerrer onlemek icin)
+            target_members = await client.get_participants(target_id)
+            target_ids = {u.id for u in target_members}
+            
+            # Kaynak uyeleri cek
+            participants = await client.get_participants(source_id, limit=limit_val + 50) # Biraz fazla cekiyoruz filtreleme icin
+            
+            count = 0
+            for u in participants:
+                if count >= limit_val: break
+                if u.bot or u.deleted or u.id in target_ids:
+                    continue
+                
+                # Etiketleme mantigi: @username yoksa Isim (Mention)
+                if u.username:
+                    u_label = f"@{u.username}"
+                else:
+                    first_name = u.first_name or "Kullanıcı"
+                    u_label = f"[{first_name}](tg://user?id={u.id})"
+
+                try:
+                    await client(functions.channels.InviteToChannelRequest(target_id, [u]))
+                    log = f"eklendi: {u_label}"
+                    print(log)
+                    await bot.send_message(user_id, log, parse_mode='markdown')
+                    count += 1
+                    await asyncio.sleep(15) 
+                
+                except UserPrivacyRestrictedError:
+                    await bot.send_message(user_id, f"gizlilik engeli: {u_label}", parse_mode='markdown')
+                except PeerFloodError:
+                    await bot.send_message(user_id, "limit doldu: hesap isleme kapandi.")
+                    break
+                except FloodWaitError as e:
+                    await bot.send_message(user_id, f"bekleme: {e.seconds} saniye...")
+                    await asyncio.sleep(e.seconds)
+                except Exception:
+                    continue
+            
+            await event.reply(f"islem bitti. toplam {count} yeni kisi eklendi.")
+            user_states.pop(user_id)
+        except ValueError:
+            await event.reply("lutfen sadece rakam girin.")
+        except Exception as e:
+            await event.reply(f"hata: {str(e).lower()}")
+        return
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_bot())
+    loop.create_task(bot.run_until_disconnected())
+    try:
+        app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    except:
+        loop.run_forever()
