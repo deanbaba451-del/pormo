@@ -1,3 +1,4 @@
+aiogram
+google-generativeai
 flask
-telethon
 gunicorn
