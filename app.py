@@ -12,7 +12,7 @@ HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Efe 💗 Damla - Barışma Kampanyası</title>
+    <title>efe 💗 damla - barışması için oy toplama kampı </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background: #ffe6f2; padding: 20px; color: #333; }
@@ -55,12 +55,12 @@ HTML = """
 </head>
 <body>
     <div class="card">
-        <h1>Efe 💗 Damla</h1>
-        <p>Aşk kazansın, barışmaları için destek ol!</p>
+        <h1>efe 💗 damla</h1>
+        <p>damlanın efeyi affetmesi için destek ol!</p>
         
         <div id="form-alani">
-            <input type="text" id="isim" placeholder="Senin Adın Ne?" maxlength="30">
-            <button id="btn" onclick="oyVer()">EVET, BARIŞSINLAR! ❤️</button>
+            <input type="text" id="isim" placeholder="senin adın ne?" maxlength="30">
+            <button id="btn" onclick="oyVer()">EVET, DAMLA EFEYİ AFFETSİN! ❤️</button>
         </div>
 
         <div id="counter">Toplanan Destek: {{ veri.toplam }}</div>
@@ -72,7 +72,7 @@ HTML = """
 
         <div class="tg-link">
             <a href="https://t.me/hwsret" target="_blank">
-                <span>💬 Mesaj Gönder: t.me/hwsret</span>
+                <span>💬 bana mesaj gönderebilirsin: t.me/hwsret</span>
             </a>
         </div>
     </div>
