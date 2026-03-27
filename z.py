@@ -1,152 +1,154 @@
 import os
+import random
 import asyncio
-import uuid
-from flask import Flask
-from threading import Thread
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-import mutagen
-from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, APIC, error
+import threading
+from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
-app = Flask('')
+# --- AYARLAR ---
+TOKEN = "8529963153:AAFYrV9um5JbsYz24_0uO1tg3YDrfnglCtE"
+ADMIN_ID = 6534222591
 
-@app.route('/')
-def home():
-    return "bot aktif"
+db = {} # Kullanıcı verileri
 
-def run_web():
-    app.run(host='0.0.0.0', port=8080)
+# --- RENDER HEALTH CHECK ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is active")
 
-NAME, ARTIST, PHOTO = range(3)
+def run_health_check():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
 
+# --- YARDIMCI FONKSİYONLAR ---
+def get_user(uid, name):
+    if uid not in db:
+        db[uid] = {"boy": 10, "hak": 2, "last_reset": datetime.now(), "name": name}
+    return db[uid]
+
+async def check_group(update: Update):
+    if update.effective_chat.type == "private":
+        await update.message.reply_text("🚫 Bu komut sadece *gruplarda* çalışır!", parse_mode="Markdown")
+        return False
+    return True
+
+# --- KOMUTLAR ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text("send audio file (mp3, m4a, wav, ogg)")
-    return NAME
+    msg = (
+        "🍆 ALEM HASTAYA HOŞ GELDİN ASLAN PARÇASI! 🍆\n\n"
+        "Burası korkakların değil, devasa malı olanların er meydanı! 🚀\n\n"
+        "🔥 KOMUTLAR:\n"
+        "📏 /uzat | 🏆 /siralama | 🪙 /yt\n"
+        "🎰 /slot | 🃏 /bk | ⚔️ /vs\n\n"
+        "🚀 Hadi, beni gruba at ve kaosu başlat!\n"
+        "⚡ @komtanim"
+    )
+    await update.message.reply_text(msg)
 
-async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    audio_data = update.message.audio or update.message.voice or update.message.document
-    
-    if not audio_data:
-        return NAME
-
-    unique_id = str(uuid.uuid4())
-    ext = ".mp3" 
-    if hasattr(audio_data, 'file_name') and audio_data.file_name:
-        ext = os.path.splitext(audio_data.file_name)[1].lower()
-    
-    path = f"{unique_id}{ext}"
-    
-    try:
-        file = await audio_data.get_file()
-        await file.download_to_drive(path)
-        
-        context.user_data['file_path'] = path
-        context.user_data['extension'] = ext
-        context.user_data['unique_id'] = unique_id
-        
-        await update.message.reply_text("send new song name")
-        return NAME
-    except Exception:
-        if os.path.exists(path): os.remove(path)
-        return ConversationHandler.END
-
-async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['song_name'] = update.message.text
-    await update.message.reply_text("send new artist name")
-    return ARTIST
-
-async def handle_artist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['artist_name'] = update.message.text
-    await update.message.reply_text("send cover photo or /skip")
-    return PHOTO
-
-async def process_tags(update: Update, context: ContextTypes.DEFAULT_TYPE, photo_path=None):
-    path = context.user_data.get('file_path')
-    ext = context.user_data.get('extension', '.mp3')
-    song_name = context.user_data.get('song_name', 'Unknown')
-    artist_name = context.user_data.get('artist_name', 'Unknown')
-
-    if not path or not os.path.exists(path):
-        return ConversationHandler.END
-
-    await update.message.reply_text("processing...")
+# --- BUL KARAYI (BK) MANTIĞI ---
+async def bk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_group(update): return
+    uid = update.effective_user.id
+    name = update.effective_user.first_name
+    user = get_user(uid, name)
 
     try:
-        if ext == '.mp3':
-            try:
-                audio = MP3(path, ID3=ID3)
-                if audio.tags is None: audio.add_tags()
-                else: audio.tags.delall('APIC')
-            except Exception:
-                audio = MP3(path, ID3=ID3)
-                audio.add_tags()
+        miktar_str = context.args[0]
+        miktar = user["boy"] if miktar_str == "all" else int(miktar_str)
+    except:
+        await update.message.reply_text("❗ Kullanım: /bk <miktar> veya /bk all\n(Bul Karayı Al Parayı: 1/3 Şans, x3 Kazanç!)")
+        return
 
-            audio.tags.add(TIT2(encoding=3, text=song_name))
-            audio.tags.add(TPE1(encoding=3, text=artist_name))
-            
-            if photo_path and os.path.exists(photo_path):
-                with open(photo_path, 'rb') as img:
-                    audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=img.read()))
-            audio.save(v2_version=3)
-        
-        else:
-            # MP3 dışındaki formatlar (m4a, ogg, wav)
-            audio = mutagen.File(path)
-            if audio is not None:
-                if ext == '.m4a':
-                    audio['\xa9nam'] = [song_name]
-                    audio['\xa9ART'] = [artist_name]
-                else:
-                    audio['title'] = [song_name]
-                    audio['artist'] = [artist_name]
-                audio.save()
+    if miktar <= 0 or miktar > user["boy"]:
+        await update.message.reply_text(f"❗ Yetersiz boy! Senin malın: {user['boy']} cm")
+        return
 
-        with open(path, 'rb') as final_audio:
-            await update.message.reply_audio(audio=final_audio, title=song_name, performer=artist_name)
-        
-        await update.message.reply_text("done. /start for new")
-
-    except Exception:
-        pass
-    finally:
-        if path and os.path.exists(path): os.remove(path)
-        if photo_path and os.path.exists(photo_path): os.remove(photo_path)
-        context.user_data.clear()
-
-    return ConversationHandler.END
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        unique_id = context.user_data.get('unique_id')
-        photo = await update.message.photo[-1].get_file()
-        photo_path = f"{unique_id}.jpg"
-        await photo.download_to_drive(photo_path)
-        return await process_tags(update, context, photo_path)
-    except Exception:
-        return await process_tags(update, context)
-
-async def skip_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await process_tags(update, context)
-
-if __name__ == '__main__':
-    Thread(target=run_web).start()
+    keyboard = [
+        [InlineKeyboardButton("🥤 1", callback_data=f"bk_1_{miktar}_{uid}"),
+         InlineKeyboardButton("🥤 2", callback_data=f"bk_2_{miktar}_{uid}"),
+         InlineKeyboardButton("🥤 3", callback_data=f"bk_3_{miktar}_{uid}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    token = "8591388747:AAEPbKMA3xf7krk-4p0syaab7iMvSB19H6k"
-    app_bot = ApplicationBuilder().token(token).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.AUDIO | filters.Document.AUDIO | filters.VOICE, handle_audio)],
-        states={
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name)],
-            ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_artist)],
-            PHOTO: [MessageHandler(filters.PHOTO, handle_photo), CommandHandler('skip', skip_photo)],
-        },
-        fallbacks=[CommandHandler('start', start)]
+    sent_msg = await update.message.reply_text(
+        f"🃏 **BUL KARAYI AL PARAYI!** 🃏\n👤 {name}\n🍆 Bahis: {miktar} cm\n❓ Kara (🃏) hangi bardağın altında?",
+        reply_markup=reply_markup, parse_mode="Markdown"
     )
 
-    app_bot.add_handler(conv_handler)
-    app_bot.add_handler(CommandHandler('start', start))
-    app_bot.run_polling()
+    # 20 Saniye Zaman Aşımı
+    context.job_queue.run_once(bk_timeout, 20, data={"chat_id": update.effective_chat.id, "user_id": uid, "name": name, "msg_id": sent_msg.message_id})
 
+async def bk_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data.split("_")
+    secim = int(data[1])
+    miktar = int(data[2])
+    owner_id = int(data[3])
+
+    if query.from_user.id != owner_id:
+        await query.answer("Bu senin bahsin değil! ✋", show_alert=True)
+        return
+
+    await query.answer()
+    user = db[owner_id]
+    kara_nerede = random.randint(1, 3)
+    
+    # Bardakları görselleştirme
+    bardaklar = ["🥤", "🥤", "🥤"]
+    bardaklar[secim-1] = "🚫" if secim != kara_nerede else "🃏"
+    bardaklar[kara_nerede-1] = "🃏"
+    visual = f"| {' | '.join(bardaklar)} |"
+
+    if secim == kara_nerede:
+        kazanc = miktar * 2 # Toplamda 3 katı olması için +2 ekliyoruz
+        user["boy"] += kazanc
+        txt = f"✅ **KAZANDIN!** ✅\n{visual}\n\nDoğru tahmin! Kara {kara_nerede}. bardaktaydı.\n📈 Ödül: +{kazanc} cm\n📏 Yeni Boy: {user['boy']} cm 🚀"
+    else:
+        user["boy"] -= miktar
+        txt = f"❌ **YANLIŞ BARDAK!** ❌\n{visual}\n\nSen {secim}. bardağı seçtin ama Kara {kara_nerede}. bardaktaydı!\n📉 Giden: -{miktar} cm\n📏 Yeni Boy: {user['boy']} cm 🥀\n\n💬 💩 Bu ne eziklik? Kaybedenler kulübü başkanı seçildin!"
+
+    await query.edit_message_text(txt, parse_mode="Markdown")
+
+async def bk_timeout(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    try:
+        await context.bot.edit_message_text(
+            chat_id=job.data["chat_id"],
+            message_id=job.data["msg_id"],
+            text=f"⚠️ **{job.data['name']}**, 20 saniye içinde elini cebinden çıkarıp seçim yapmadığın için bahis iptal! 💤",
+            parse_mode="Markdown"
+        )
+    except: pass
+
+# --- DİĞER KOMUTLAR (SLOT, UZAT VB. TEMEL MANTIK) ---
+async def uzat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_group(update): return
+    user = get_user(update.effective_user.id, update.effective_user.first_name)
+    if user["hak"] <= 0:
+        await update.message.reply_text("⏳ Sakin ol şampiyon, motoru yakacaksın. Hakların bitti.")
+        return
+    artis = random.randint(1, 5)
+    user["boy"] += artis
+    user["hak"] -= 1
+    await update.message.reply_text(f"🔥 **HELAL OLSUN!** 🔥\n🍆 Penisini tam {artis} cm uzattın!\n📏 Yeni boyun: {user['boy']} cm")
+
+# --- ANA ÇALIŞTIRICI ---
+def main():
+    threading.Thread(target=run_health_check, daemon=True).start()
+    app = Application.builder().token(TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("uzat", uzat))
+    app.add_handler(CommandHandler("bk", bk))
+    app.add_handler(CallbackQueryHandler(bk_callback, pattern="^bk_"))
+    
+    print("Bot başlatıldı...")
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
