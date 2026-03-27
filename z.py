@@ -14,7 +14,7 @@ def run_flask():
     server.run(host='0.0.0.0', port=port)
 
 # --- AYARLAR ---
-TOKEN = "8529963153:AAFYrV9um5JbsYz24_0uO1tg3YDrfnglCtE"
+TOKEN = "8529963153:AAF_A3WOpcHdBM5_5lhlrU6rqjmKlRniZzs"
 ADMIN_ID = 6534222591
 db = {} # Bellekte tutulan veriler
 authorized_groups = set()
