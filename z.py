@@ -56,7 +56,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔐 **Admin:**\n"
         "🎫 /promokodolustur — Rastgele kod oluştur.\n\n"
         "🌟 **EMEĞİ GEÇENLER** 🌟\n"
-        "⚡ @Drak0vDev & @ByMakarow"
+        "⚡ @komtanim & @sucluluk"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
