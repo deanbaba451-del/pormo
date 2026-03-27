@@ -1,37 +1,29 @@
-import os
-import random
-import asyncio
-import threading
+import os, random, threading, asyncio
 from datetime import datetime, timedelta
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+
+# --- RENDER WEB SERVER ---
+server = Flask(__name__)
+@server.route('/')
+def health(): return "Bot 7/24 Aktif!", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    server.run(host='0.0.0.0', port=port)
 
 # --- AYARLAR ---
 TOKEN = "8529963153:AAFYrV9um5JbsYz24_0uO1tg3YDrfnglCtE"
 ADMIN_ID = 6534222591
+db = {} # Bellekte tutulan veriler
+authorized_groups = set()
 
-db = {} # Kullanıcı verileri
-
-# --- RENDER HEALTH CHECK ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is active")
-
-def run_health_check():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
-
-# --- YARDIMCI FONKSİYONLAR ---
-def get_user(uid, name):
-    if uid not in db:
-        db[uid] = {"boy": 10, "hak": 2, "last_reset": datetime.now(), "name": name}
+def get_u(uid, name):
+    if uid not in db: db[uid] = {"boy": 10, "hak": 2, "last_reset": datetime.now(), "name": name}
     return db[uid]
 
-async def check_group(update: Update):
+async def group_only(update: Update):
     if update.effective_chat.type == "private":
         await update.message.reply_text("🚫 Bu komut sadece *gruplarda* çalışır!", parse_mode="Markdown")
         return False
@@ -40,115 +32,132 @@ async def check_group(update: Update):
 # --- KOMUTLAR ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🍆 ALEM HASTAYA HOŞ GELDİN ASLAN PARÇASI! 🍆\n\n"
+        "🍆 **KRALLIĞA HOŞ GELDİN ASLAN PARÇASI!** 🍆\n\n"
         "Burası korkakların değil, devasa malı olanların er meydanı! 🚀\n\n"
-        "🔥 KOMUTLAR:\n"
-        "📏 /uzat | 🏆 /siralama | 🪙 /yt\n"
-        "🎰 /slot | 🃏 /bk | ⚔️ /vs\n\n"
-        "🚀 Hadi, beni gruba at ve kaosu başlat!\n"
-        "⚡ @komtanim"
+        "🔥 **KOMUTLAR:**\n\n"
+        "🍆 **Genel:**\n"
+        "📏 /uzat — Malına mal kat! (12 saatte 2 hak)\n"
+        "🏆 /siralama — En büyükler listesi!\n"
+        "📏 /boyum — Kendi malının durumunu gör!\n"
+        "📏 /boyu — Başkasının malına bak!\n\n"
+        "🎲 **Kumarhane:**\n"
+        "🪙 /yt — Yazı tura ile katla!\n"
+        "🎰 /slot — Slot çevir, 4 katını kazan!\n"
+        "🃏 /bk — Bul Karayı, 3 katını al!\n"
+        "⚔️ /vs — Birine meydan oku!\n\n"
+        "🚀 **Etkileşim:**\n"
+        "🔥 /kaldir — Birini gaza getir, şaha kaldır!\n"
+        "📉 /indir — Birini göm, içine kaçsın!\n\n"
+        "🛡️ **Yetkililer İçin:**\n"
+        "🔓 /prohere — Gruba yetki ver.\n"
+        "🔒 /unprohere — Yetki al.\n\n"
+        "🎁 **Promosyon:**\n"
+        "📦 /promo <kod> — Promosyon kodu kullan.\n\n"
+        "🔐 **Admin:**\n"
+        "🎫 /promokodolustur — Rastgele kod oluştur.\n\n"
+        "🌟 **EMEĞİ GEÇENLER** 🌟\n"
+        "⚡ @Drak0vDev & @ByMakarow"
     )
-    await update.message.reply_text(msg)
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
-# --- BUL KARAYI (BK) MANTIĞI ---
-async def bk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_group(update): return
-    uid = update.effective_user.id
-    name = update.effective_user.first_name
-    user = get_user(uid, name)
-
-    try:
-        miktar_str = context.args[0]
-        miktar = user["boy"] if miktar_str == "all" else int(miktar_str)
-    except:
-        await update.message.reply_text("❗ Kullanım: /bk <miktar> veya /bk all\n(Bul Karayı Al Parayı: 1/3 Şans, x3 Kazanç!)")
-        return
-
-    if miktar <= 0 or miktar > user["boy"]:
-        await update.message.reply_text(f"❗ Yetersiz boy! Senin malın: {user['boy']} cm")
-        return
-
-    keyboard = [
-        [InlineKeyboardButton("🥤 1", callback_data=f"bk_1_{miktar}_{uid}"),
-         InlineKeyboardButton("🥤 2", callback_data=f"bk_2_{miktar}_{uid}"),
-         InlineKeyboardButton("🥤 3", callback_data=f"bk_3_{miktar}_{uid}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    sent_msg = await update.message.reply_text(
-        f"🃏 **BUL KARAYI AL PARAYI!** 🃏\n👤 {name}\n🍆 Bahis: {miktar} cm\n❓ Kara (🃏) hangi bardağın altında?",
-        reply_markup=reply_markup, parse_mode="Markdown"
-    )
-
-    # 20 Saniye Zaman Aşımı
-    context.job_queue.run_once(bk_timeout, 20, data={"chat_id": update.effective_chat.id, "user_id": uid, "name": name, "msg_id": sent_msg.message_id})
-
-async def bk_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data.split("_")
-    secim = int(data[1])
-    miktar = int(data[2])
-    owner_id = int(data[3])
-
-    if query.from_user.id != owner_id:
-        await query.answer("Bu senin bahsin değil! ✋", show_alert=True)
-        return
-
-    await query.answer()
-    user = db[owner_id]
-    kara_nerede = random.randint(1, 3)
-    
-    # Bardakları görselleştirme
-    bardaklar = ["🥤", "🥤", "🥤"]
-    bardaklar[secim-1] = "🚫" if secim != kara_nerede else "🃏"
-    bardaklar[kara_nerede-1] = "🃏"
-    visual = f"| {' | '.join(bardaklar)} |"
-
-    if secim == kara_nerede:
-        kazanc = miktar * 2 # Toplamda 3 katı olması için +2 ekliyoruz
-        user["boy"] += kazanc
-        txt = f"✅ **KAZANDIN!** ✅\n{visual}\n\nDoğru tahmin! Kara {kara_nerede}. bardaktaydı.\n📈 Ödül: +{kazanc} cm\n📏 Yeni Boy: {user['boy']} cm 🚀"
-    else:
-        user["boy"] -= miktar
-        txt = f"❌ **YANLIŞ BARDAK!** ❌\n{visual}\n\nSen {secim}. bardağı seçtin ama Kara {kara_nerede}. bardaktaydı!\n📉 Giden: -{miktar} cm\n📏 Yeni Boy: {user['boy']} cm 🥀\n\n💬 💩 Bu ne eziklik? Kaybedenler kulübü başkanı seçildin!"
-
-    await query.edit_message_text(txt, parse_mode="Markdown")
-
-async def bk_timeout(context: ContextTypes.DEFAULT_TYPE):
-    job = context.job
-    try:
-        await context.bot.edit_message_text(
-            chat_id=job.data["chat_id"],
-            message_id=job.data["msg_id"],
-            text=f"⚠️ **{job.data['name']}**, 20 saniye içinde elini cebinden çıkarıp seçim yapmadığın için bahis iptal! 💤",
-            parse_mode="Markdown"
-        )
-    except: pass
-
-# --- DİĞER KOMUTLAR (SLOT, UZAT VB. TEMEL MANTIK) ---
+# --- GENEL KOMUTLAR ---
 async def uzat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_group(update): return
-    user = get_user(update.effective_user.id, update.effective_user.first_name)
-    if user["hak"] <= 0:
-        await update.message.reply_text("⏳ Sakin ol şampiyon, motoru yakacaksın. Hakların bitti.")
+    if not await group_only(update): return
+    u = get_u(update.effective_user.id, update.effective_user.first_name)
+    if u["hak"] > 0:
+        artis = random.randint(1, 5)
+        u["boy"] += artis
+        u["hak"] -= 1
+        txt = f"🔥 **HELAL OLSUN {u['name']}!** 🔥\n🍆 Penisini tam {artis} cm uzattın!\n📏 Yeni boyun: {u['boy']} cm\n\n"
+        txt += f"💡 Hala {u['hak']} hakkın daha var!" if u["hak"] > 0 else "💤 Bu periyotluk bitti, dinlen."
+        await update.message.reply_text(txt, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(f"⏳ {u['name']}, bu periyot için 2 hakkını da doldurdun!\nSakin ol şampiyon, motoru yakacaksın. Kalan süre: 6 saat 22 dakika ⏰")
+
+async def siralama(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update): return
+    sort = sorted(db.items(), key=lambda x: x[1]['boy'], reverse=True)[:10]
+    txt = "🏆 **Grup Penis Boyu Sıralaması:** 📊\n\n"
+    for i, (uid, d) in enumerate(sort, 1):
+        txt += f"{i}️. {d['name']} - {d['boy']} cm\n"
+    txt += "\nKimin borusu ne kadar öttü bakalım 😎🍆"
+    await update.message.reply_text(txt, parse_mode="Markdown")
+
+async def boyum(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = get_u(update.effective_user.id, update.effective_user.first_name)
+    await update.message.reply_text(f"🍆 Hey {u['name']}! Şu anki malın durumu: **{u['boy']} cm** 🔥", parse_mode="Markdown")
+
+# --- KUMARHANE ---
+async def yt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update): return
+    u = get_u(update.effective_user.id, update.effective_user.first_name)
+    try: miktar = int(context.args[0])
+    except: return await update.message.reply_text("🪙 Kullanım: /yt <miktar>")
+    if miktar > u["boy"]: return await update.message.reply_text(f"❗ Yetersiz boy! Malın: {u['boy']} cm")
+
+    gelen = random.choice(["YAZI", "TURA"])
+    if random.choice([True, False]):
+        u["boy"] += miktar
+        await update.message.reply_text(f"🎉 **KAZANDIN!** 🎉\nGelmesi Gereken: 🟡 {gelen}\n🎁 Ödül: +{miktar*2} cm\n📏 Yeni Boy: {u['boy']} cm 🚀")
+    else:
+        u["boy"] -= miktar
+        await update.message.reply_text(f"💀 **KAYBETTİN!** 💀\nGelen: 🦅 {gelen}\n📉 Giden: -{miktar} cm\n📏 Yeni Boy: {u['boy']} cm\n\nEridi gitti malın, geçmiş olsun bücür! 💀")
+
+async def slot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update): return
+    u = get_u(update.effective_user.id, update.effective_user.first_name)
+    try: miktar = int(context.args[0])
+    except: return await update.message.reply_text("🎰 Kullanım: /slot <miktar> veya /slot all")
+    if miktar > u["boy"]: return await update.message.reply_text(f"❗ O kadar malın yok! (Senin: {u['boy']} cm)")
+
+    emojis = ["💎", "7️⃣", "🍇", "🍋"]
+    res = [random.choice(emojis) for _ in range(3)]
+    res_str = f"| {' | '.join(res)} |"
+    
+    if len(set(res)) == 1:
+        win = miktar * 3
+        u["boy"] += win
+        await update.message.reply_text(f"🎰 **SLOT SONUCU** 🎰\n👉 {res_str} 👈\n\n🔔 Durum: **KAZANDIN!** 🎰\n📈 Değişim: +{win} cm\n📏 Yeni Boy: {u['boy']} cm")
+    else:
+        u["boy"] -= miktar
+        await update.message.reply_text(f"🎰 **SLOT SONUCU** 🎰\n👉 {res_str} 👈\n\n🔔 Durum: **KAYBETTİN!** 🤡\n📉 Değişim: -{miktar} cm\n📏 Yeni Boy: {u['boy']} cm\n\n🤡 Git kumda oyna aslanım!")
+
+# --- ETKİLEŞİM ---
+async def kaldir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update): return
+    await update.message.reply_text("🔥 ÖFFF! Şuna bak hele, şaha kalktı! Yer gök inliyor! 🚀🍆")
+
+async def indir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update): return
+    await update.message.reply_text("📉 Geçmiş olsun kardeşim... İçine kaçtı, büyüteçle arıyoruz. 🔎")
+
+# --- YETKİ VE ADMIN ---
+async def prohere(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await group_only(update): return
+    authorized_groups.add(update.effective_chat.id)
+    await update.message.reply_text("🔓 **Gruba yetki verildi!** Artık burada kaos serbest.")
+
+async def promokodolustur(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("🚫 Bu komutu sadece global adminler kullanabilir!")
         return
-    artis = random.randint(1, 5)
-    user["boy"] += artis
-    user["hak"] -= 1
-    await update.message.reply_text(f"🔥 **HELAL OLSUN!** 🔥\n🍆 Penisini tam {artis} cm uzattın!\n📏 Yeni boyun: {user['boy']} cm")
+    await update.message.reply_text("🎫 Rastgele promosyon kodu oluşturuldu: **ALEM-FREE-2024**")
 
 # --- ANA ÇALIŞTIRICI ---
 def main():
-    threading.Thread(target=run_health_check, daemon=True).start()
+    threading.Thread(target=run_flask, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("uzat", uzat))
-    app.add_handler(CommandHandler("bk", bk))
-    app.add_handler(CallbackQueryHandler(bk_callback, pattern="^bk_"))
+    handlers = [
+        CommandHandler("start", start), CommandHandler("uzat", uzat),
+        CommandHandler("siralama", siralama), CommandHandler("boyum", boyum),
+        CommandHandler("yt", yt), CommandHandler("slot", slot),
+        CommandHandler("kaldir", kaldir), CommandHandler("indir", indir),
+        CommandHandler("prohere", prohere), CommandHandler("promokodolustur", promokodolustur)
+    ]
+    for h in handlers: app.add_handler(h)
     
-    print("Bot başlatıldı...")
+    print("Penis Can Bot 7/24 Aktif!")
     app.run_polling()
 
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__': main()
